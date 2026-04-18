@@ -81,11 +81,12 @@ gh workflow run daily-news-digest
 - `https://vnexpress.net/rss/thoi-su.rss` — politics/current affairs
 - `https://vnexpress.net/rss/suc-khoe.rss` — health
 
-**ENG (BBC):**
-- `http://feeds.bbci.co.uk/news/business/rss.xml`
-- `http://feeds.bbci.co.uk/news/technology/rss.xml`
-- `http://feeds.bbci.co.uk/news/world/rss.xml`
-- `http://feeds.bbci.co.uk/news/health/rss.xml`
+**ENG (BBC + Hacker News):**
+- `http://feeds.bbci.co.uk/news/business/rss.xml` (finance, 2)
+- `http://feeds.bbci.co.uk/news/technology/rss.xml` (tech, 1)
+- `https://hnrss.org/frontpage?points=100&count=20` (tech community, 1)
+- `http://feeds.bbci.co.uk/news/world/rss.xml` (politics, 2)
+- `http://feeds.bbci.co.uk/news/health/rss.xml` (health, 1)
 
 ## Notes
 
