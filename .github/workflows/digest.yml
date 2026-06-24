@@ -31,6 +31,6 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Leave feed vars unset to use defaults in src/config.py.
           TOP_N: "7"
-          GEMINI_MODEL: gemini-2.5-flash-lite
+          GEMINI_MODEL: gemini-2.5-flash
           LOOKBACK_HOURS: "24"
         run: python -m src.main

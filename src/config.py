@@ -69,6 +69,6 @@ def load() -> Config:
         feeds_vn=_feeds("RSS_URLS_VN", DEFAULT_VN_FEEDS),
         feeds_eng=_feeds("RSS_URLS_ENG", DEFAULT_ENG_FEEDS),
         top_n=int(os.environ.get("TOP_N", "7")),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
         lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
     )

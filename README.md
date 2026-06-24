@@ -70,7 +70,7 @@ gh workflow run daily-news-digest
 | `RSS_URLS_ENG` | BBC business/technology/world/health | comma-separated |
 | `PER_FEED_TOP` | 2 | max articles pulled per feed |
 | `TOP_N` | 8 | cap per bucket after merge |
-| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | free tier |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | free tier |
 | `LOOKBACK_HOURS` | 24 | window size |
 
 ## Default feeds
@@ -91,6 +91,6 @@ gh workflow run daily-news-digest
 ## Notes
 
 - GitHub Actions cron can lag 5–15 min. Fine for a digest.
-- Free Gemini tier (`gemini-2.5-flash-lite`): 1500 RPD. Two calls/day = ample.
+- Free Gemini tier (`gemini-2.5-flash`): 1500 RPD. Two calls/day = ample.
 - No cross-day dedupe yet; daily 24h window naturally minimizes overlap.
 - To customize: set `RSS_URLS_VN` or `RSS_URLS_ENG` in `.env` or workflow env.

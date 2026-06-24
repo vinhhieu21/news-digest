@@ -79,7 +79,7 @@ def _format_articles(articles: list[Article]) -> str:
     wait=wait_exponential(multiplier=2, min=2, max=20),
     retry=retry_if_exception_type(Exception),
 )
-def _call_gemini(model: genai.GenerativeModel, prompt: str) -> str:
+def _call_gemini(model: genai.GenerativeModel, prompt: str) -> dict:
     resp = model.generate_content(
         prompt,
         generation_config={
@@ -89,7 +89,14 @@ def _call_gemini(model: genai.GenerativeModel, prompt: str) -> str:
     )
     if not resp.text:
         raise RuntimeError("Empty response from Gemini")
-    return resp.text
+    # Parse inside the retry: Gemini occasionally emits malformed JSON
+    # (stray comma / missing brace) even with response_mime_type set.
+    # Retrying re-samples (temperature > 0) and almost always recovers.
+    try:
+        return json.loads(resp.text)
+    except json.JSONDecodeError as exc:
+        log.warning("Gemini returned non-JSON, retrying: %s", resp.text[:300])
+        raise RuntimeError("Gemini response was not valid JSON") from exc
 
 
 def summarize(articles: list[Article], api_key: str, model_name: str, locale: Locale) -> dict:
@@ -97,13 +104,7 @@ def summarize(articles: list[Article], api_key: str, model_name: str, locale: Lo
     model = genai.GenerativeModel(model_name)
     template = PROMPT_VN if locale == "vn" else PROMPT_ENG
     prompt = template.format(articles_block=_format_articles(articles))
-    raw = _call_gemini(model, prompt)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        log.error("Gemini returned non-JSON: %s", raw[:500])
-        raise RuntimeError("Gemini response was not valid JSON") from exc
-    return data
+    return _call_gemini(model, prompt)
 
 
 def render_html(summary: dict, articles: list[Article], date: datetime, locale: Locale) -> str:
