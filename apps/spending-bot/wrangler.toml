@@ -10,7 +10,7 @@ enabled = true
 # to the group, read the id from `wrangler tail`, then set it and deploy again.
 ALLOWED_CHAT_ID = ""
 # Bot username without "@", used to match `/cmd@BotName`.
-BOT_USERNAME = ""
+BOT_USERNAME = "nth1bot"
 # Workers AI model for expense categories and the monthly commentary. Empty = no LLM;
 # the bot then works exactly as before, minus those two features.
 LLM_MODEL = "@cf/aisingapore/gemma-sea-lion-v4-27b-it"
@@ -23,7 +23,7 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "spending-bot-db"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "a42ba259-a356-4391-96ed-9ca9da68cc61"
 migrations_dir = "migrations"
 
 [triggers]
