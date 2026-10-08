@@ -8,7 +8,7 @@ enabled = true
 [vars]
 # The group's chat id (negative number). Leave empty on first deploy, add the bot
 # to the group, read the id from `wrangler tail`, then set it and deploy again.
-ALLOWED_CHAT_ID = ""
+ALLOWED_CHAT_ID = "-1001551080059"
 # Bot username without "@", used to match `/cmd@BotName`.
 BOT_USERNAME = "nth1bot"
 # Workers AI model for expense categories and the monthly commentary. Empty = no LLM;
