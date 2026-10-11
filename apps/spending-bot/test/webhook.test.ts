@@ -1,6 +1,7 @@
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { claimBudgetWarning, deleteBudget, setBudget } from "../src/db";
 import worker, { DAILY_CRON, MONTHLY_CRON } from "../src/index";
 import { EDIT_UNDONE } from "../src/report/format";
 import type { TgChat, TgMessage, TgUpdate } from "../src/telegram";
@@ -80,13 +81,21 @@ async function post(update: unknown, secret = "test-secret"): Promise<Response> 
   return res;
 }
 
-/** Posts the update and returns the text of the first message the bot sent ("" if none). */
-async function sendUpdate(update: TgUpdate): Promise<string> {
+/** Texts of every sendMessage for one update: the reply first, then extra messages (budget warnings). */
+async function sendUpdateAll(update: TgUpdate): Promise<string[]> {
   sent = [];
   const res = await post(update);
   expect(res.status).toBe(200);
-  const reply = sent.find((s) => s.method === "sendMessage");
-  return String(reply?.body.text ?? "");
+  return sent.filter((s) => s.method === "sendMessage").map((s) => String(s.body.text));
+}
+
+/** Posts the update and returns the text of the first message the bot sent ("" if none). */
+async function sendUpdate(update: TgUpdate): Promise<string> {
+  return (await sendUpdateAll(update))[0] ?? "";
+}
+
+async function sendAll(text: string, from = AN): Promise<string[]> {
+  return sendUpdateAll(messageUpdate(text, from));
 }
 
 /** Sends `text` and returns the bot's reply. `extra` is merged into the message (e.g. reply_to_message). */
@@ -301,7 +310,8 @@ describe("commands", () => {
 
   it("/help lists the commands", async () => {
     const reply = await send("/help");
-    for (const cmd of ["/add", "/check", "/summary", "/undo", "/daily"]) expect(reply).toContain(cmd);
+    for (const cmd of ["/add", "/check", "/budget", "/summary", "/undo", "/daily"]) expect(reply).toContain(cmd);
+    expect(reply).not.toContain(String.fromCharCode(0x2014));
   });
 
   it("refreshes member names on every command", async () => {
@@ -344,6 +354,7 @@ describe("categories (Workers AI stubbed)", () => {
   });
 
   it("with LLM_MODEL empty the bot makes no AI calls", async () => {
+    const ctx = createExecutionContext();
     const res = await worker.fetch(
       new Request("https://bot.example/", {
         method: "POST",
@@ -351,8 +362,9 @@ describe("categories (Workers AI stubbed)", () => {
         body: JSON.stringify(messageUpdate("/add 50k cafe")),
       }),
       { ...env, LLM_MODEL: "" },
-      createExecutionContext(),
+      ctx,
     );
+    await waitOnExecutionContext(ctx); // the budget check is always deferred; let it finish before the next test
     expect(res.status).toBe(200);
     expect(aiCalls).toHaveLength(0);
   });
@@ -545,6 +557,199 @@ describe("editing /add", () => {
     expect(await allExpenses()).toEqual([
       { amount: 60_000, note: "cafe", spent_on: "2026-10-08", category: "an_uong", message_id: 1001, deleted: 0 },
     ]);
+  });
+});
+
+describe("budget", () => {
+  const storedAmount = async () =>
+    env.DB.prepare("SELECT amount FROM budgets WHERE chat_id = ?").bind(GROUP).first();
+  const budgetCount = async () =>
+    (await env.DB.prepare("SELECT COUNT(*) AS n FROM budgets").first<{ n: number }>())?.n;
+
+  it("shows how to set a budget when none is set", async () => {
+    expect(await send("/budget")).toBe(
+      "Nhóm chưa đặt ngân sách tháng.\nCách dùng: /budget &lt;số tiền&gt; để đặt, /budget để xem, /budget off để xoá\nVí dụ: /budget 5tr",
+    );
+  });
+
+  it("sets, shows and removes the budget; earlier months do not count", async () => {
+    await send("/add 1tr2 a", HIEU);
+    await send("/add 300k b 05/09", HIEU);
+    const shown = "Ngân sách mỗi tháng: 5.000.000đ\nĐã chi tháng 10: 1.200.000đ (24%)\nCòn lại: 3.800.000đ";
+    expect(await send("/budget 5tr")).toBe(`Đã đặt ngân sách.\n${shown}`);
+    expect(await send("/budget")).toBe(shown);
+    expect(await storedAmount()).toEqual({ amount: 5_000_000 });
+    expect(await send("/budget off")).toBe("Đã xoá ngân sách tháng.");
+    expect(await send("/budget")).toContain("chưa đặt");
+    expect(await send("/budget OFF")).toBe("Nhóm chưa đặt ngân sách tháng.");
+  });
+
+  it("shows overspending", async () => {
+    await send("/budget 1tr");
+    await send("/add 1tr2 a");
+    expect(await send("/budget")).toBe(
+      "Ngân sách mỗi tháng: 1.000.000đ\nĐã chi tháng 10: 1.200.000đ (120%)\nVượt ngân sách: 200.000đ",
+    );
+  });
+
+  it.each([
+    ["500k", 500_000],
+    ["1.5tr", 1_500_000],
+    ["1tr2", 1_200_000],
+    ["2m", 2_000_000],
+    ["1.250.000", 1_250_000],
+  ])("uses the /add amount parser: /budget %s", async (arg, amount) => {
+    await send(`/budget ${arg}`);
+    expect(await storedAmount()).toEqual({ amount });
+  });
+
+  it("rejects bad input and stores nothing", async () => {
+    expect(await send("/budget abc")).toContain("không hợp lệ");
+    expect(await send("/budget -5tr")).toContain("không hợp lệ");
+    expect(await send("/budget 50")).toContain("quá nhỏ");
+    expect(await send("/budget 0")).toContain("quá nhỏ");
+    expect(await send("/budget 200tr")).toContain("100.000.000đ");
+    expect(await send("/budget 5tr cafe")).toContain("Cách dùng");
+    expect(await budgetCount()).toBe(0);
+  });
+
+  it("/check is unchanged without a budget and adds the remaining line with one", async () => {
+    await send("/add 2tr a");
+    await send("/add 300k b 05/09");
+    const before = await send("/check");
+    await send("/budget 5tr");
+    expect(await send("/check")).toBe(`${before}\nNgân sách còn lại: 3.000.000đ`);
+    await send("/budget 1tr");
+    expect(await send("/check")).toMatch(/\nVượt ngân sách: 1\.000\.000đ$/);
+    await send("/budget off");
+    expect(await send("/check")).toBe(before);
+  });
+
+  it("/check with a budget and no expenses", async () => {
+    await send("/budget 5tr");
+    expect(await send("/check")).toBe(
+      "Chi tiêu tháng 10 (đến 08/10)\nChưa có khoản chi nào.\nNgân sách còn lại: 5.000.000đ",
+    );
+  });
+
+  it("warns once at 80% and once at 100%, after an unchanged /add reply", async () => {
+    await send("/budget 1tr");
+    expect(await sendAll("/add 700k a")).toHaveLength(1);
+
+    expect(await sendAll("/add 100k b")).toEqual([
+      "Đã ghi 100.000đ · b · An\nTháng 10 của bạn: 800.000đ",
+      "<b>Cảnh báo ngân sách</b>\nCả nhóm đã dùng 80% ngân sách tháng 10 (800.000đ / 1.000.000đ).\nCòn lại: 200.000đ",
+    ]);
+    const warning = sent.filter((s) => s.method === "sendMessage" && String(s.body.text).includes("Cảnh báo"));
+    expect(warning).toHaveLength(1);
+    expect(warning[0]!.body).toMatchObject({ chat_id: GROUP });
+    expect(warning[0]!.body).not.toHaveProperty("reply_parameters");
+
+    expect(await sendAll("/add 50k c")).toHaveLength(1);
+    const at100 = await sendAll("/add 150k d", HIEU);
+    expect(at100).toHaveLength(2);
+    expect(at100[1]).toBe(
+      "<b>Cảnh báo ngân sách</b>\nCả nhóm đã dùng 100% ngân sách tháng 10 (1.000.000đ / 1.000.000đ).\nCòn lại: 0đ",
+    );
+    expect(await sendAll("/add 50k e")).toHaveLength(1);
+
+    await send("/undo");
+    await send("/undo");
+    expect(await sendAll("/add 200k f")).toHaveLength(1); // both levels already warned this month
+  });
+
+  it("one expense past both levels sends a single 100% warning", async () => {
+    await send("/budget 1tr");
+    const texts = await sendAll("/add 1tr1 a");
+    expect(texts).toHaveLength(2);
+    expect(texts[1]).toContain("110%");
+    expect(texts[1]).toContain("Vượt ngân sách: 100.000đ");
+    expect(await sendAll("/add 10k b")).toHaveLength(1);
+  });
+
+  it("expenses dated in a previous month neither count nor warn", async () => {
+    await send("/budget 1tr");
+    expect(await sendAll("/add 900k a 05/09")).toHaveLength(1);
+    expect(await send("/budget")).toContain("Đã chi tháng 10: 0đ (0%)");
+  });
+
+  it("warnings re-arm in a new ICT month", async () => {
+    await send("/budget 1tr");
+    expect(await sendAll("/add 850k a")).toHaveLength(2);
+    vi.setSystemTime(new Date("2026-10-31T17:30:00Z")); // 00:30 ICT on 1 Nov
+    expect(await sendAll("/add 900k b hôm qua")).toHaveLength(1); // dated 31/10, previous month
+    const texts = await sendAll("/add 850k c");
+    expect(texts).toHaveLength(2);
+    expect(texts[1]).toContain("tháng 11");
+    expect(texts[1]).toContain("85%");
+  });
+
+  it("changing the budget re-arms only levels not yet reached", async () => {
+    await send("/budget 1tr");
+    await send("/add 850k a"); // 80% warned
+    await send("/budget 2tr"); // 42%, level 0
+    expect(await sendAll("/add 800k b")).toHaveLength(2); // 1.650k, 82%
+    await send("/budget 1.5tr"); // 110%, level 100 recorded
+    expect(await sendAll("/add 10k c")).toHaveLength(1);
+  });
+
+  it("a budget set after spending counts reached levels as announced", async () => {
+    await send("/add 850k a");
+    await send("/budget 1tr"); // 85%, level 80 recorded
+    expect(await sendAll("/add 10k b")).toHaveLength(1);
+    const texts = await sendAll("/add 200k c"); // 1.060k
+    expect(texts).toHaveLength(2);
+    expect(texts[1]).toContain("106%");
+  });
+
+  it("without a budget /add sends only the reply, and /budget off silences warnings", async () => {
+    expect(await sendAll("/add 50tr a")).toHaveLength(1);
+    await send("/budget 1tr");
+    await send("/budget off");
+    expect(await sendAll("/add 50k b")).toHaveLength(1);
+  });
+
+  it("concurrent adds produce a single warning", async () => {
+    await send("/budget 1tr");
+    await send("/add 700k a");
+    sent = [];
+    await Promise.all([post(messageUpdate("/add 100k b")), post(messageUpdate("/add 100k c", HIEU))]);
+    expect(sent.filter((s) => String(s.body.text).includes("Cảnh báo"))).toHaveLength(1);
+  });
+});
+
+describe("claimBudgetWarning", () => {
+  const AMOUNT = 1_000_000;
+  const NOW = "2026-10-08T03:00:00.000Z";
+
+  it("lets exactly one of two concurrent claims win", async () => {
+    await setBudget(env.DB, GROUP, AMOUNT, "2026-10", 0, NOW);
+    const results = await Promise.all([
+      claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 80),
+      claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 80),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("never claims a lower or equal level after a higher one in the same month", async () => {
+    await setBudget(env.DB, GROUP, AMOUNT, "2026-10", 0, NOW);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 100)).toBe(true);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 80)).toBe(false);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 100)).toBe(false);
+  });
+
+  it("re-arms in a new month", async () => {
+    await setBudget(env.DB, GROUP, AMOUNT, "2026-10", 0, NOW);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 100)).toBe(true);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-11", 80)).toBe(true);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-11", 80)).toBe(false);
+  });
+
+  it("does not claim when the budget amount changed or was removed", async () => {
+    await setBudget(env.DB, GROUP, AMOUNT, "2026-10", 0, NOW);
+    expect(await claimBudgetWarning(env.DB, GROUP, 2_000_000, "2026-10", 80)).toBe(false);
+    await deleteBudget(env.DB, GROUP);
+    expect(await claimBudgetWarning(env.DB, GROUP, AMOUNT, "2026-10", 80)).toBe(false);
   });
 });
 

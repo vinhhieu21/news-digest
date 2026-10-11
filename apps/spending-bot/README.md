@@ -5,7 +5,8 @@ A Telegram bot for one friend group. Members log spending with `/add`, check tot
 | Command | Example | What it does |
 |---|---|---|
 | `/add <amount> [note] [hôm qua \| dd/mm]` | `/add 50k cafe sáng` | Saves an expense for the sender. Editing the message updates it |
-| `/check` | | Each member's total from the 1st of the month to today, plus today's group total |
+| `/check` | | Each member's total from the 1st of the month to today, plus today's group total, plus what is left of the budget when one is set |
+| `/budget [amount\|off]` | `/budget 5tr` | Sets the group's monthly budget, shows spent and remaining this month, or removes it |
 | `/summary [month] [year]` | `/summary 9` | Full summary for one month, with the change vs. the previous month and a breakdown by category |
 | `/undo` | reply `/undo` to your `/add` | Soft-deletes the sender's most recent expense, or, sent as a reply to one of their own `/add` messages, that expense |
 | `/daily on\|off` | | Turns the 21:00 ICT nightly recap on or off |
@@ -20,7 +21,7 @@ The valid range is 1,000đ to 100,000,000đ.
 
 ```
 wrangler.toml            D1 binding "DB", cron triggers, vars
-migrations/0001_init.sql
+migrations/*.sql
 src/
   index.ts               fetch() = webhook, scheduled() = cron
   router.ts              chat filter, /cmd@Bot stripping, dispatch
@@ -103,3 +104,9 @@ Tests stub `env.AI.run` (`remoteBindings: false` in `vitest.config.ts`), so they
   Any other edit that does not result in an `/add` (for example an `/add` changed into another command) is ignored.
 - Defaults chosen from the plan's open decisions: replies in Vietnamese, any member can run `/daily`, and `/undo` removes your last entry whatever its age.
 - A reply `/undo` only deletes an expense the sender recorded. Replying to anything else (someone else's `/add`, a non-expense message, an already deleted one) deletes nothing and says so. In forum topics, the implicit reply to the topic's opening message counts as a plain `/undo`.
+- Monthly budget (`/budget`): only expenses dated in the current ICT month count.
+  At 80% and 100% of the budget the bot posts one separate warning per level per month, after the `/add` reply.
+  One expense that jumps past both levels gives a single 100% warning.
+  Changing the budget treats levels already reached under the new amount as announced and re-arms the rest.
+  `/budget off` clears everything, including the warning state.
+  `/undo` does not re-arm warnings.

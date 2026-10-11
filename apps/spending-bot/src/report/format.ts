@@ -95,15 +95,41 @@ export function checkMessage(opts: {
   members: MemberTotal[];
   todayTotal: number;
   monthTotal: number;
+  /** Monthly budget in VND; a "remaining" line is added only when set. */
+  budget?: number | null;
 }): string {
-  const { month, today, members, todayTotal, monthTotal } = opts;
+  const { month, today, members, todayTotal, monthTotal, budget } = opts;
   const header = `Chi tiêu tháng ${month.month} (đến ${formatDayMonth(today)})`;
-  if (members.length === 0) return `${header}\nChưa có khoản chi nào.`;
+  const budgetLine = typeof budget === "number" ? [balanceLine(budget, monthTotal, "Ngân sách còn lại")] : [];
+  if (members.length === 0) return [header, "Chưa có khoản chi nào.", ...budgetLine].join("\n");
   return [
     header,
     ...rankedLines(members, (m) => `${formatVnd(m.total)} (${m.count} lần)`),
     `Hôm nay: ${formatVnd(todayTotal)} · Cả nhóm: ${formatVnd(monthTotal)}`,
+    ...budgetLine,
   ].join("\n");
+}
+
+export function budgetMessage(opts: { budget: number; month: YearMonth; spent: number }): string {
+  const { budget, month, spent } = opts;
+  return [
+    `Ngân sách mỗi tháng: ${formatVnd(budget)}`,
+    `Đã chi tháng ${month.month}: ${formatVnd(spent)} (${usedPercent(spent, budget)}%)`,
+    balanceLine(budget, spent, "Còn lại"),
+  ].join("\n");
+}
+
+export function budgetWarningMessage(opts: { budget: number; month: YearMonth; spent: number }): string {
+  const { budget, month, spent } = opts;
+  return [
+    "<b>Cảnh báo ngân sách</b>",
+    `Cả nhóm đã dùng ${usedPercent(spent, budget)}% ngân sách tháng ${month.month} (${formatVnd(spent)} / ${formatVnd(budget)}).`,
+    balanceLine(budget, spent, "Còn lại"),
+  ].join("\n");
+}
+
+function balanceLine(budget: number, spent: number, leftLabel: string): string {
+  return spent > budget ? `Vượt ngân sách: ${formatVnd(spent - budget)}` : `${leftLabel}: ${formatVnd(budget - spent)}`;
 }
 
 export function summaryMessage(opts: {
@@ -162,10 +188,16 @@ export function percentChange(current: number, previous: number): string {
   return `${pct > 0 ? "+" : ""}${pct}%`;
 }
 
+/** Share of the budget used, rounded down: 79.9% reads as 79%, never as 80%. */
+export function usedPercent(spent: number, budget: number): number {
+  return Math.floor((spent * 100) / budget);
+}
+
 export const USAGE = {
   add: "Cách dùng: /add &lt;số tiền&gt; [ghi chú] [hôm qua | dd/mm]\nVí dụ: /add 50k cafe sáng",
   summary: "Cách dùng: /summary [tháng] [năm]\nVí dụ: /summary 9",
   daily: "Cách dùng: /daily on hoặc /daily off",
+  budget: "Cách dùng: /budget &lt;số tiền&gt; để đặt, /budget để xem, /budget off để xoá\nVí dụ: /budget 5tr",
 } as const;
 
 export const ADD_ERRORS = {
@@ -179,15 +211,24 @@ export const ADD_ERRORS = {
 export const EDIT_KEPT = "Khoản chi cũ được giữ nguyên.";
 export const EDIT_UNDONE = "Khoản chi này đã bị xoá bằng /undo nên không sửa được. Gửi /add mới nếu muốn ghi lại.";
 
+export const NO_BUDGET = "Nhóm chưa đặt ngân sách tháng.";
+
+export const BUDGET_ERRORS = {
+  invalid: `Số tiền không hợp lệ.\n${USAGE.budget}`,
+  needs_unit: "Số tiền quá nhỏ. Hãy ghi rõ đơn vị, ví dụ: /budget 5tr",
+  out_of_range: ADD_ERRORS.out_of_range,
+} as const;
+
 export const HELP_MESSAGE = [
   "<b>Các lệnh</b>",
-  "/add 50k cafe sáng — ghi một khoản chi (thêm \"hôm qua\" hoặc 05/10 để đổi ngày)",
+  "/add 50k cafe sáng - ghi một khoản chi (thêm \"hôm qua\" hoặc 05/10 để đổi ngày)",
   "Gõ sai thì sửa lại tin nhắn /add, bot sẽ cập nhật khoản chi.",
-  "/check — tổng chi từ đầu tháng",
-  "/summary 9 — tổng kết một tháng",
-  "/undo — xoá khoản chi gần nhất của bạn (trả lời tin nhắn /add để xoá đúng khoản đó)",
-  "/daily on — bật/tắt tổng kết lúc 21:00",
-  "/help — xem hướng dẫn",
+  "/check - tổng chi từ đầu tháng",
+  "/budget 5tr - đặt ngân sách tháng cho nhóm (/budget để xem, /budget off để xoá)",
+  "/summary 9 - tổng kết một tháng",
+  "/undo - xoá khoản chi gần nhất của bạn (trả lời tin nhắn /add để xoá đúng khoản đó)",
+  "/daily on - bật/tắt tổng kết lúc 21:00",
+  "/help - xem hướng dẫn",
 ].join("\n");
 
 export const UNDO_NOT_YOURS =

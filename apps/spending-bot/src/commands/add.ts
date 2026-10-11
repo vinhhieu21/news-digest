@@ -3,6 +3,7 @@ import { insertExpense, messageExpenseState, saveEditedExpense, userTotal } from
 import { parseAdd } from "../parse/add";
 import { ADD_ERRORS, addedMessage, EDIT_KEPT, EDIT_UNDONE, updatedMessage, type ExpenseView } from "../report/format";
 import { currentMonthIct, monthRange, todayIct } from "../time";
+import { warnOnBudgetThreshold } from "./budget";
 import { reply, type CommandContext } from "./context";
 
 export async function add(ctx: CommandContext): Promise<void> {
@@ -75,6 +76,9 @@ async function confirm(ctx: CommandContext, expense: ExpenseView, format: typeof
   const { from, to } = monthRange(month);
   const monthTotal = await userTotal(ctx.db, ctx.chatId, ctx.user.id, from, to);
   await reply(ctx, format({ expense, name: ctx.user.first_name, today, month, monthTotal }));
+
+  // After the reply, so its text never changes; sends at most one budget warning. Edits count too.
+  ctx.defer(() => warnOnBudgetThreshold(ctx.db, ctx.tg, ctx.chatId, ctx.now, expense.spent_on));
 
   // After the reply, so the LLM never delays it. Picks up this expense plus any earlier misses.
   const { llm } = ctx;

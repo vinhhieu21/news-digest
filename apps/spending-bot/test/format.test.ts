@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseCommand } from "../src/router";
+import { reachedThreshold } from "../src/commands/budget";
 import { parseMonthArgs } from "../src/commands/summary";
-import { displayNames, escapeHtml, formatVnd, percentChange } from "../src/report/format";
-import { currentMonthIct, monthRange, previousMonth, todayIct } from "../src/time";
+import { displayNames, escapeHtml, formatVnd, percentChange, usedPercent } from "../src/report/format";
+import { currentMonthIct, monthKey, monthRange, previousMonth, todayIct } from "../src/time";
 
 describe("formatVnd", () => {
   it.each([
@@ -53,6 +54,36 @@ describe("ICT time helpers", () => {
     expect(monthRange({ year: 2028, month: 2 })).toEqual({ from: "2028-02-01", to: "2028-02-29" });
     expect(monthRange({ year: 2026, month: 12 })).toEqual({ from: "2026-12-01", to: "2026-12-31" });
     expect(previousMonth({ year: 2026, month: 1 })).toEqual({ year: 2025, month: 12 });
+  });
+
+  it("formats a month key", () => {
+    expect(monthKey({ year: 2026, month: 1 })).toBe("2026-01");
+    expect(monthKey({ year: 2026, month: 12 })).toBe("2026-12");
+  });
+});
+
+describe("usedPercent", () => {
+  it.each([
+    [799_999, 1_000_000, 79],
+    [800_000, 1_000_000, 80],
+    [999_999, 1_000_000, 99],
+    [1_000_000, 1_000_000, 100],
+    [0, 5_000_000, 0],
+    [1_234_567, 1_000_000, 123],
+  ])("%i of %i is %i%%", (spent, budget, expected) => {
+    expect(usedPercent(spent, budget)).toBe(expected);
+  });
+});
+
+describe("reachedThreshold", () => {
+  it.each([
+    [799_999, 0],
+    [800_000, 80],
+    [999_999, 80],
+    [1_000_000, 100],
+    [5_000_000, 100],
+  ])("%i of 1.000.000 reaches level %i", (spent, level) => {
+    expect(reachedThreshold(spent, 1_000_000)).toBe(level);
   });
 });
 

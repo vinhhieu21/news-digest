@@ -45,6 +45,11 @@ export function monthRange({ year, month }: YearMonth): { from: string; to: stri
   return { from: toYmd(year, month, 1), to: toYmd(year, month, lastDay) };
 }
 
+/** { year: 2026, month: 10 } -> "2026-10" */
+export function monthKey({ year, month }: YearMonth): string {
+  return `${String(year).padStart(4, "0")}-${pad2(month)}`;
+}
+
 export function previousMonth({ year, month }: YearMonth): YearMonth {
   return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 }

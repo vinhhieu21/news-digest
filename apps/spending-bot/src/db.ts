@@ -270,3 +270,58 @@ export async function setDailyEnabled(db: D1Database, chatId: number, enabled: b
     .bind(chatId, enabled ? 1 : 0)
     .run();
 }
+
+/** The chat's monthly budget in VND, or null if none is set. */
+export async function getBudget(db: D1Database, chatId: number): Promise<number | null> {
+  const row = await db
+    .prepare("SELECT amount FROM budgets WHERE chat_id = ?")
+    .bind(chatId)
+    .first<{ amount: number }>();
+  return row?.amount ?? null;
+}
+
+/** Sets (or replaces) the budget and its warning state for `warnedMonth`. */
+export async function setBudget(
+  db: D1Database,
+  chatId: number,
+  amount: number,
+  warnedMonth: string,
+  warnedLevel: number,
+  nowIso: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO budgets (chat_id, amount, warned_month, warned_level, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (chat_id) DO UPDATE SET amount = excluded.amount, warned_month = excluded.warned_month,
+         warned_level = excluded.warned_level, updated_at = excluded.updated_at`,
+    )
+    .bind(chatId, amount, warnedMonth, warnedLevel, nowIso)
+    .run();
+}
+
+/** Removes the budget. Returns false if there was none. */
+export async function deleteBudget(db: D1Database, chatId: number): Promise<boolean> {
+  const res = await db.prepare("DELETE FROM budgets WHERE chat_id = ?").bind(chatId).run();
+  return res.meta.changes === 1;
+}
+
+/**
+ * Records that `level` was warned in `month`, unless it (or a higher level) already was, or the
+ * budget is no longer `amount`. Returns true only for the one caller that should send the warning.
+ */
+export async function claimBudgetWarning(
+  db: D1Database,
+  chatId: number,
+  amount: number,
+  month: string,
+  level: number,
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE budgets SET warned_month = ?, warned_level = ?
+       WHERE chat_id = ? AND amount = ? AND (warned_month <> ? OR warned_level < ?)`,
+    )
+    .bind(month, level, chatId, amount, month, level)
+    .run();
+  return res.meta.changes === 1;
+}
