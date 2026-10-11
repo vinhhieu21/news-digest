@@ -16,7 +16,7 @@ DEFAULT_VN_FEEDS: list[Feed] = [
 DEFAULT_ENG_FEEDS: list[Feed] = [
     ("http://feeds.bbci.co.uk/news/business/rss.xml", 2),           # finance
     ("http://feeds.bbci.co.uk/news/technology/rss.xml", 1),         # tech (mainstream)
-    ("https://hnrss.org/frontpage?points=100&count=20", 1),         # tech (HN community)
+    ("https://news.ycombinator.com/rss", 1),                         # tech (HN front page)
     ("http://feeds.bbci.co.uk/news/world/rss.xml", 2),              # politics
     ("http://feeds.bbci.co.uk/news/health/rss.xml", 1),             # health
 ]

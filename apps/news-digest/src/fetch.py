@@ -7,11 +7,37 @@ from datetime import datetime, timedelta, timezone
 from time import mktime
 
 import feedparser
+import httpx
 import trafilatura
+from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 log = logging.getLogger(__name__)
 
 BODY_CHAR_LIMIT = 1500
+USER_AGENT = "Mozilla/5.0 (compatible; news-digest/1.0)"
+
+
+class TransientHTTPError(Exception):
+    pass
+
+
+@retry(
+    reraise=True,
+    before_sleep=before_sleep_log(log, logging.WARNING),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=10),
+    retry=retry_if_exception_type((httpx.TransportError, TransientHTTPError)),
+)
+def _get(client: httpx.Client, url: str) -> httpx.Response:
+    r = client.get(url)
+    if r.status_code >= 500 or r.status_code == 429:
+        raise TransientHTTPError(f"HTTP {r.status_code} for {url}")
+    r.raise_for_status()
+    return r
+
+
+def _client() -> httpx.Client:
+    return httpx.Client(timeout=20.0, follow_redirects=True, headers={"User-Agent": USER_AGENT})
 
 
 @dataclass
@@ -31,8 +57,8 @@ def _parse_published(entry) -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
-def fetch_rss(url: str, top_n: int, lookback_hours: int) -> list[Article]:
-    feed = feedparser.parse(url)
+def fetch_rss(client: httpx.Client, url: str, top_n: int, lookback_hours: int) -> list[Article]:
+    feed = feedparser.parse(_get(client, url).content)
     if feed.bozo and not feed.entries:
         raise RuntimeError(f"Failed to parse RSS feed: {url} ({feed.bozo_exception})")
 
@@ -60,11 +86,12 @@ def fetch_rss(url: str, top_n: int, lookback_hours: int) -> list[Article]:
 
 def fetch_multi(feeds: list[tuple[str, int]], overall_top: int, lookback_hours: int) -> list[Article]:
     merged: list[Article] = []
-    for url, cap in feeds:
-        try:
-            merged.extend(fetch_rss(url, cap, lookback_hours))
-        except Exception as exc:
-            log.warning("feed %s failed: %s", url, exc)
+    with _client() as client:
+        for url, cap in feeds:
+            try:
+                merged.extend(fetch_rss(client, url, cap, lookback_hours))
+            except Exception as exc:
+                log.warning("feed %s failed: %s", url, exc)
 
     seen: set[str] = set()
     deduped: list[Article] = []
@@ -77,12 +104,11 @@ def fetch_multi(feeds: list[tuple[str, int]], overall_top: int, lookback_hours: 
     return deduped[:overall_top]
 
 
-def _extract_body(url: str) -> str:
-    downloaded = trafilatura.fetch_url(url)
-    if not downloaded:
-        return ""
+def _extract_body(client: httpx.Client, url: str) -> str:
+    html = _get(client, url).text
     text = trafilatura.extract(
-        downloaded,
+        html,
+        url=url,
         include_comments=False,
         include_tables=False,
         no_fallback=False,
@@ -94,8 +120,8 @@ def _extract_body(url: str) -> str:
 
 
 def enrich_bodies(articles: list[Article], max_workers: int = 5) -> list[Article]:
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futs = {pool.submit(_extract_body, a.url): a for a in articles}
+    with _client() as client, ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futs = {pool.submit(_extract_body, client, a.url): a for a in articles}
         for fut in as_completed(futs):
             art = futs[fut]
             try:

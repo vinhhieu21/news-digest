@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 log = logging.getLogger(__name__)
 
@@ -29,17 +29,22 @@ def _chunk(text: str, limit: int = MAX_LEN) -> list[str]:
     return chunks
 
 
+class TransientTelegramError(RuntimeError):
+    pass
+
+
 @retry(
     reraise=True,
+    before_sleep=before_sleep_log(log, logging.WARNING),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=2, max=10),
-    retry=retry_if_exception_type((httpx.HTTPError, RuntimeError)),
+    retry=retry_if_exception_type((httpx.TransportError, TransientTelegramError)),
 )
 def _post(url: str, payload: dict) -> None:
     with httpx.Client(timeout=20.0) as client:
         r = client.post(url, json=payload)
         if r.status_code >= 500 or r.status_code == 429:
-            raise RuntimeError(f"Telegram {r.status_code}: {r.text}")
+            raise TransientTelegramError(f"Telegram {r.status_code}: {r.text}")
         if r.status_code >= 400:
             raise RuntimeError(f"Telegram client error {r.status_code}: {r.text}")
 

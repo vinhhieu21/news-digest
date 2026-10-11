@@ -5,8 +5,9 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-import google.generativeai as genai
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from google import genai
+from google.genai import types
+from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .fetch import Article
 
@@ -75,17 +76,19 @@ def _format_articles(articles: list[Article]) -> str:
 
 @retry(
     reraise=True,
+    before_sleep=before_sleep_log(log, logging.WARNING),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=2, max=20),
     retry=retry_if_exception_type(Exception),
 )
-def _call_gemini(model: genai.GenerativeModel, prompt: str) -> dict:
-    resp = model.generate_content(
-        prompt,
-        generation_config={
-            "temperature": 0.3,
-            "response_mime_type": "application/json",
-        },
+def _call_gemini(client: genai.Client, model_name: str, prompt: str) -> dict:
+    resp = client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.3,
+            response_mime_type="application/json",
+        ),
     )
     if not resp.text:
         raise RuntimeError("Empty response from Gemini")
@@ -100,11 +103,10 @@ def _call_gemini(model: genai.GenerativeModel, prompt: str) -> dict:
 
 
 def summarize(articles: list[Article], api_key: str, model_name: str, locale: Locale) -> dict:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    client = genai.Client(api_key=api_key)
     template = PROMPT_VN if locale == "vn" else PROMPT_ENG
     prompt = template.format(articles_block=_format_articles(articles))
-    return _call_gemini(model, prompt)
+    return _call_gemini(client, model_name, prompt)
 
 
 def render_html(summary: dict, articles: list[Article], date: datetime, locale: Locale) -> str:

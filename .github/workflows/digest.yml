@@ -32,7 +32,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Same group chat as spending-bot (apps/spending-bot/wrangler.toml).
+          TELEGRAM_CHAT_ID: "-1001551080059"
           # Leave feed vars unset to use defaults in src/config.py.
           TOP_N: "7"
           GEMINI_MODEL: gemini-2.5-flash
