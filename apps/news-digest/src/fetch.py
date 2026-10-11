@@ -13,7 +13,7 @@ from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_afte
 
 log = logging.getLogger(__name__)
 
-BODY_CHAR_LIMIT = 1500
+BODY_CHAR_LIMIT = 1200
 USER_AGENT = "Mozilla/5.0 (compatible; news-digest/1.0)"
 
 
@@ -84,7 +84,7 @@ def fetch_rss(client: httpx.Client, url: str, top_n: int, lookback_hours: int) -
     return selected
 
 
-def fetch_multi(feeds: list[tuple[str, int]], overall_top: int, lookback_hours: int) -> list[Article]:
+def fetch_multi(feeds: list[tuple[str, int]], lookback_hours: int) -> list[Article]:
     merged: list[Article] = []
     with _client() as client:
         for url, cap in feeds:
@@ -101,7 +101,7 @@ def fetch_multi(feeds: list[tuple[str, int]], overall_top: int, lookback_hours: 
         seen.add(a.url)
         deduped.append(a)
 
-    return deduped[:overall_top]
+    return deduped
 
 
 def _extract_body(client: httpx.Client, url: str) -> str:

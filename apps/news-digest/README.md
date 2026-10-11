@@ -16,9 +16,10 @@ Cloudflare cron 02:00 UTC (trigger/)
   → GitHub API workflow_dispatch → digest.yml (starts within seconds)
   ├── VN bucket
   │     feedparser × 4 topic feeds (kinh-doanh, so-hoa, thoi-su, suc-khoe)
-  │     → 2 per feed → merge → dedupe by URL → cap TOP_N
+  │     → up to 6-8 recent candidates per feed → merge → dedupe by URL
   │     → httpx + trafilatura (concurrent body extraction, retries on 5xx/429)
-  │     → Gemini 2.5 Flash (Vietnamese prompt, JSON output)
+  │     → Gemini 3.8 Flash picks the TOP_N most important, topic-balanced,
+  │       and summarizes them (Vietnamese prompt, schema-enforced JSON)
   │     → Telegram HTML message (chunked if >4000 chars)
   └── ENG bucket (same flow, BBC business/tech/world/health, English prompt)
 ```
@@ -95,26 +96,29 @@ This dispatches the real workflow, which posts to the group.
 | `GEMINI_API_KEY` | - | required |
 | `TELEGRAM_BOT_TOKEN` | - | required |
 | `TELEGRAM_CHAT_ID` | - | required; the group id in CI |
-| `RSS_URLS_VN` | VnExpress kinh-doanh/so-hoa/thoi-su/suc-khoe | comma-separated, optional `url\|cap` |
+| `RSS_URLS_VN` | VnExpress kinh-doanh/so-hoa/thoi-su/suc-khoe | comma-separated, optional `url\|cap` (cap = candidates pulled, default 6) |
 | `RSS_URLS_ENG` | BBC business/technology/world/health + HN | comma-separated, optional `url\|cap` |
-| `TOP_N` | 7 | cap per bucket after merge |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | free tier |
+| `TOP_N` | 7 | stories Gemini picks per bucket |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | free tier; Pro models have no free quota |
 | `LOOKBACK_HOURS` | 24 | window size |
 
 ## Default feeds
 
 **VN (VnExpress):**
-- `https://vnexpress.net/rss/kinh-doanh.rss` - finance/business
-- `https://vnexpress.net/rss/so-hoa.rss` - tech
-- `https://vnexpress.net/rss/thoi-su.rss` - politics/current affairs
-- `https://vnexpress.net/rss/suc-khoe.rss` - health
+- `https://vnexpress.net/rss/kinh-doanh.rss` (finance, 8)
+- `https://vnexpress.net/rss/so-hoa.rss` (tech, 8)
+- `https://vnexpress.net/rss/thoi-su.rss` (politics/current affairs, 8)
+- `https://vnexpress.net/rss/suc-khoe.rss` (health, 6)
 
 **ENG (BBC + Hacker News):**
-- `http://feeds.bbci.co.uk/news/business/rss.xml` (finance, 2)
-- `http://feeds.bbci.co.uk/news/technology/rss.xml` (tech, 1)
-- `https://news.ycombinator.com/rss` (HN front page, 1)
-- `http://feeds.bbci.co.uk/news/world/rss.xml` (politics, 2)
-- `http://feeds.bbci.co.uk/news/health/rss.xml` (health, 1)
+- `http://feeds.bbci.co.uk/news/business/rss.xml` (finance, 8)
+- `http://feeds.bbci.co.uk/news/technology/rss.xml` (tech, 6)
+- `https://news.ycombinator.com/rss` (HN front page, 6)
+- `http://feeds.bbci.co.uk/news/world/rss.xml` (politics, 8)
+- `http://feeds.bbci.co.uk/news/health/rss.xml` (health, 6)
+
+The number is how many recent candidates each feed contributes.
+Gemini then picks the most important `TOP_N` across all of them, aiming for about 2 finance, 2 tech, 2 politics and 1 health, and skipping celebrity, lifestyle and promotional pieces.
 
 ## Notes
 

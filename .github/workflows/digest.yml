@@ -37,7 +37,8 @@ jobs:
     needs: guard
     if: ${{ !cancelled() && needs.guard.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Worst case is two buckets each retrying a slow Gemini call three times.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/news-digest
@@ -61,6 +62,6 @@ jobs:
           TELEGRAM_CHAT_ID: "-1001551080059"
           # Leave feed vars unset to use defaults in src/config.py.
           TOP_N: "7"
-          GEMINI_MODEL: gemini-2.5-flash
+          GEMINI_MODEL: gemini-3.8-flash
           LOOKBACK_HOURS: "24"
         run: python -m src.main

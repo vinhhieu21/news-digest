@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 from typing import Literal
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .fetch import Article
@@ -14,52 +14,74 @@ from .fetch import Article
 log = logging.getLogger(__name__)
 
 Locale = Literal["vn", "eng"]
+Topic = Literal["finance", "tech", "politics", "health", "other"]
+
+# A healthy call takes ~30-60s. Cap each attempt so a stalled request is
+# retried instead of eating the whole CI job budget.
+GEMINI_TIMEOUT_MS = 90_000
 
 
-PROMPT_VN = """Bạn là biên tập viên tin tức. Tóm tắt các bài báo dưới đây thành bản tin buổi sáng bằng tiếng Việt.
+class DigestItem(BaseModel):
+    index: int = Field(description="Number of the source article in the ARTICLES list")
+    topic: Topic
+    headline: str
+    summary: str
 
-ƯU TIÊN CHỦ ĐỀ: tài chính / kinh doanh, công nghệ, chính trị / thời sự, y tế / sức khoẻ.
-Nếu bài ngoài các chủ đề trên, chỉ đưa vào khi thực sự nổi bật.
 
-YÊU CẦU:
-- Mở đầu bằng 1 câu tổng quan về chủ đề nổi bật trong ngày.
-- Với mỗi bài, viết 2-3 câu ngắn gọn, trung tính, giữ tên riêng/số liệu.
-- KHÔNG bịa thông tin. Chỉ dùng nội dung trong bài.
-- KHÔNG thêm link (hệ thống tự gắn).
-- Trả về JSON đúng cấu trúc.
+class Digest(BaseModel):
+    overview: str
+    items: list[DigestItem]
 
-ĐỊNH DẠNG JSON:
-{{
-  "overview": "câu tổng quan",
-  "items": [
-    {{"index": 1, "topic": "tài chính|công nghệ|chính trị|y tế|khác", "headline": "tiêu đề ngắn gọn", "summary": "tóm tắt 2-3 câu"}}
-  ]
-}}
+
+TOPIC_EMOJI: dict[str, str] = {
+    "finance": "💰",
+    "tech": "💻",
+    "politics": "🏛",
+    "health": "🩺",
+    "other": "📌",
+}
+
+
+PROMPT_VN = """Bạn là biên tập viên trưởng của một bản tin buổi sáng cho người bận rộn.
+Dưới đây là {count} bài báo trong 24 giờ qua. Hãy CHỌN đúng {top_n} tin quan trọng nhất và tóm tắt bằng tiếng Việt.
+
+CÁCH CHỌN:
+- Ưu tiên tin có tác động rộng: chính sách, kinh tế vĩ mô, thị trường, doanh nghiệp lớn, công nghệ, an toàn y tế cộng đồng.
+- Cố gắng cân bằng chủ đề: khoảng 2 tài chính, 2 công nghệ, 2 chính trị/thời sự, 1 y tế. Được lệch nếu ngày đó một chủ đề thực sự nổi bật hơn.
+- BỎ QUA: tin người nổi tiếng, mẹo làm đẹp/sống khoẻ, quảng cáo, đánh giá sản phẩm, sự kiện giải trí, tai nạn nhỏ mang tính địa phương.
+- Nếu hai bài cùng một sự kiện, chỉ chọn một.
+- Sắp xếp theo mức độ quan trọng giảm dần.
+
+CÁCH VIẾT:
+- "overview": 1 câu nêu cụ thể 2-3 sự kiện lớn nhất hôm nay (tên, con số), không viết chung chung.
+- "headline": ngắn gọn, tối đa 12 từ, nêu điều mới xảy ra.
+- "summary": 1-2 câu, tối đa 45 từ. Câu đầu: chuyện gì xảy ra kèm con số/tên riêng quan trọng. Câu sau (nếu cần): vì sao đáng chú ý.
+- "topic": chọn theo nội dung thực tế của bài, không theo chuyên mục nguồn.
+- "index": số thứ tự của bài trong danh sách.
+- Chỉ dùng thông tin trong bài, KHÔNG bịa. KHÔNG thêm link.
 
 BÀI BÁO:
 {articles_block}
 """
 
 
-PROMPT_ENG = """You are a news editor. Summarize the articles below into an English morning brief.
+PROMPT_ENG = """You are the editor-in-chief of a morning brief for busy readers.
+Below are {count} articles from the last 24 hours. PICK exactly the {top_n} most important and summarize them in English.
 
-TOPIC PRIORITY: finance / business, technology, politics / world affairs, health.
-Include items outside these topics only if genuinely significant.
+HOW TO PICK:
+- Favor stories with broad impact: policy, macroeconomics, markets, major companies, technology shifts, public health.
+- Aim for topic balance: about 2 finance, 2 tech, 2 politics/world, 1 health. Deviate only if one topic genuinely dominates the day.
+- SKIP: celebrity news, lifestyle or wellness advice, promotional pieces, product reviews, entertainment, minor local incidents.
+- If two articles cover the same event, pick one.
+- Order items by importance, most important first.
 
-REQUIREMENTS:
-- Lead with one sentence capturing the dominant theme of the day.
-- For each article: 2-3 tight, neutral sentences. Keep names, figures, and places.
-- Do NOT invent facts. Use only the article content provided.
-- Do NOT include URLs (the system attaches them).
-- Return JSON matching the schema exactly.
-
-JSON SCHEMA:
-{{
-  "overview": "one-sentence overview",
-  "items": [
-    {{"index": 1, "topic": "finance|tech|politics|health|other", "headline": "short headline", "summary": "2-3 sentence summary"}}
-  ]
-}}
+HOW TO WRITE:
+- "overview": one sentence naming the 2-3 biggest stories concretely (names, numbers). No generic filler.
+- "headline": at most 12 words, stating what is new.
+- "summary": 1-2 sentences, at most 45 words. First sentence: what happened, with the key name or figure. Second (optional): why it matters.
+- "topic": based on what the article is actually about, not the source section.
+- "index": the article's number in the list.
+- Use only facts from the articles. Do NOT invent. Do NOT include URLs.
 
 ARTICLES:
 {articles_block}
@@ -74,6 +96,19 @@ def _format_articles(articles: list[Article]) -> str:
     return "\n---\n".join(blocks)
 
 
+def _valid_items(digest: Digest, article_count: int, top_n: int) -> list[DigestItem]:
+    """Drop items pointing at unknown or already-used articles, keep model order."""
+    seen: set[int] = set()
+    out: list[DigestItem] = []
+    for it in digest.items:
+        if not 1 <= it.index <= article_count or it.index in seen:
+            log.warning("Dropping item with invalid or duplicate index %d", it.index)
+            continue
+        seen.add(it.index)
+        out.append(it)
+    return out[:top_n]
+
+
 @retry(
     reraise=True,
     before_sleep=before_sleep_log(log, logging.WARNING),
@@ -81,57 +116,50 @@ def _format_articles(articles: list[Article]) -> str:
     wait=wait_exponential(multiplier=2, min=2, max=20),
     retry=retry_if_exception_type(Exception),
 )
-def _call_gemini(client: genai.Client, model_name: str, prompt: str) -> dict:
+def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_count: int, top_n: int) -> Digest:
     resp = client.models.generate_content(
         model=model_name,
         contents=prompt,
         config=types.GenerateContentConfig(
-            temperature=0.3,
             response_mime_type="application/json",
+            response_schema=Digest,
         ),
     )
-    if not resp.text:
-        raise RuntimeError("Empty response from Gemini")
-    # Parse inside the retry: Gemini occasionally emits malformed JSON
-    # (stray comma / missing brace) even with response_mime_type set.
-    # Retrying re-samples (temperature > 0) and almost always recovers.
-    try:
-        return json.loads(resp.text)
-    except json.JSONDecodeError as exc:
-        log.warning("Gemini returned non-JSON, retrying: %s", resp.text[:300])
-        raise RuntimeError("Gemini response was not valid JSON") from exc
+    digest = resp.parsed
+    if not isinstance(digest, Digest):
+        raise RuntimeError(f"Gemini response did not match schema: {(resp.text or '')[:300]}")
+    digest.items = _valid_items(digest, article_count, top_n)
+    if not digest.items:
+        raise RuntimeError("Gemini returned no usable items")
+    return digest
 
 
-def summarize(articles: list[Article], api_key: str, model_name: str, locale: Locale) -> dict:
-    client = genai.Client(api_key=api_key)
+def summarize(articles: list[Article], api_key: str, model_name: str, locale: Locale, top_n: int) -> Digest:
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
     template = PROMPT_VN if locale == "vn" else PROMPT_ENG
-    prompt = template.format(articles_block=_format_articles(articles))
-    return _call_gemini(client, model_name, prompt)
+    top_n = min(top_n, len(articles))
+    prompt = template.format(count=len(articles), top_n=top_n, articles_block=_format_articles(articles))
+    return _call_gemini(client, model_name, prompt, len(articles), top_n)
 
 
-def render_html(summary: dict, articles: list[Article], date: datetime, locale: Locale) -> str:
+def render_html(digest: Digest, articles: list[Article], date: datetime, locale: Locale) -> str:
     def esc(s: str) -> str:
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
     if locale == "vn":
-        header = f"<b>📰 Bản tin sáng {date.strftime('%d/%m/%Y')} · VN</b>"
+        header = f"<b>📰 Bản tin sáng {date.strftime('%d/%m/%Y')}</b>"
     else:
-        header = f"<b>🌍 Morning Brief {date.strftime('%d/%m/%Y')} · ENG</b>"
+        header = f"<b>🌍 Morning Brief {date.strftime('%d/%m/%Y')}</b>"
 
-    overview = esc(summary.get("overview", "").strip())
     lines = [header]
+    overview = esc(digest.overview.strip())
     if overview:
-        lines.append(f"\n<i>{overview}</i>")
+        lines.append(f"<i>{overview}</i>")
 
-    items_by_index = {it["index"]: it for it in summary.get("items", [])}
-    for i, art in enumerate(articles, 1):
-        item = items_by_index.get(i)
-        if not item:
-            continue
-        headline = esc(item.get("headline", art.title).strip())
-        body = esc(item.get("summary", "").strip())
-        topic = esc(item.get("topic", "").strip())
-        topic_tag = f" <i>[{topic}]</i>" if topic else ""
-        lines.append(f"\n<b>{i}. <a href=\"{esc(art.url)}\">{headline}</a></b>{topic_tag}\n{body}")
+    for item in digest.items:
+        art = articles[item.index - 1]
+        headline = esc(item.headline.strip() or art.title)
+        emoji = TOPIC_EMOJI.get(item.topic, TOPIC_EMOJI["other"])
+        lines.append(f"{emoji} <b><a href=\"{esc(art.url)}\">{headline}</a></b>\n{esc(item.summary.strip())}")
 
-    return "\n".join(lines)
+    return "\n\n".join(lines)

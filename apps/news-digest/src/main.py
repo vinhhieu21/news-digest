@@ -22,7 +22,7 @@ log = logging.getLogger("digest")
 
 def _run_bucket(cfg: Config, feeds: list[tuple[str, int]], locale: Locale, date: datetime, label: str) -> bool:
     log.info("[%s] fetching %d feeds", label, len(feeds))
-    articles = fetch_multi(feeds, cfg.top_n, cfg.lookback_hours)
+    articles = fetch_multi(feeds, cfg.lookback_hours)
     if not articles:
         log.warning("[%s] no articles in lookback window; skipping", label)
         return False
@@ -32,10 +32,10 @@ def _run_bucket(cfg: Config, feeds: list[tuple[str, int]], locale: Locale, date:
         log.warning("[%s] no articles with usable content after extraction; skipping", label)
         return False
 
-    summary = summarize(articles, cfg.gemini_api_key, cfg.gemini_model, locale)
-    html = render_html(summary, articles, date, locale)
+    digest = summarize(articles, cfg.gemini_api_key, cfg.gemini_model, locale, cfg.top_n)
+    html = render_html(digest, articles, date, locale)
     telegram.send(cfg.telegram_bot_token, cfg.telegram_chat_id, html)
-    log.info("[%s] sent digest with %d items", label, len(articles))
+    log.info("[%s] sent digest with %d of %d candidates", label, len(digest.items), len(articles))
     return True
 
 
