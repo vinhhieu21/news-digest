@@ -16,8 +16,8 @@ log = logging.getLogger(__name__)
 Locale = Literal["vn", "eng"]
 Topic = Literal["finance", "tech", "politics", "health", "other"]
 
-# A healthy call takes ~30-60s. Cap each attempt so a stalled request is
-# retried instead of eating the whole CI job budget.
+# With low thinking a healthy call takes ~5-15s. Cap each attempt so a
+# stalled request is retried instead of eating the whole CI job budget.
 GEMINI_TIMEOUT_MS = 90_000
 
 
@@ -109,11 +109,23 @@ def _valid_items(digest: Digest, article_count: int, top_n: int) -> list[DigestI
     return out[:top_n]
 
 
+def _thinking_config(model_name: str) -> types.ThinkingConfig:
+    """Keep thinking light: default thinking is ~10x slower for near-identical picks.
+
+    Gemini 2.x only takes a token budget; 3.x only takes a level.
+    """
+    if model_name.startswith("gemini-2."):
+        return types.ThinkingConfig(thinking_budget=1024)
+    return types.ThinkingConfig(thinking_level="low")
+
+
 @retry(
     reraise=True,
     before_sleep=before_sleep_log(log, logging.WARNING),
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=20),
+    # 503 "high demand" spells on Flash models last tens of seconds, so short
+    # backoffs burn every attempt inside the same spell.
+    wait=wait_exponential(multiplier=10, min=10, max=60),
     retry=retry_if_exception_type(Exception),
 )
 def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_count: int, top_n: int) -> Digest:
@@ -123,6 +135,7 @@ def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_cou
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=Digest,
+            thinking_config=_thinking_config(model_name),
         ),
     )
     digest = resp.parsed
@@ -134,12 +147,22 @@ def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_cou
     return digest
 
 
-def summarize(articles: list[Article], api_key: str, model_name: str, locale: Locale, top_n: int) -> Digest:
+def summarize(articles: list[Article], api_key: str, models: list[str], locale: Locale, top_n: int) -> Digest:
+    """Try each model in order; move to the next once one exhausts its retries."""
     client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
     template = PROMPT_VN if locale == "vn" else PROMPT_ENG
     top_n = min(top_n, len(articles))
     prompt = template.format(count=len(articles), top_n=top_n, articles_block=_format_articles(articles))
-    return _call_gemini(client, model_name, prompt, len(articles), top_n)
+    for i, model_name in enumerate(models):
+        try:
+            digest = _call_gemini(client, model_name, prompt, len(articles), top_n)
+            log.info("Summarized with %s", model_name)
+            return digest
+        except Exception as exc:
+            if i == len(models) - 1:
+                raise
+            log.warning("Model %s failed (%s), falling back to %s", model_name, str(exc)[:200], models[i + 1])
+    raise ValueError("No Gemini models configured")
 
 
 def render_html(digest: Digest, articles: list[Article], date: datetime, locale: Locale) -> str:

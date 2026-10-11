@@ -22,6 +22,10 @@ DEFAULT_ENG_FEEDS: list[Feed] = [
     ("http://feeds.bbci.co.uk/news/health/rss.xml", 6),             # health
 ]
 
+# Tried in order; the next one is used once a model exhausts its retries.
+# 3.8 Flash is the best free model but often returns 503 under load.
+DEFAULT_GEMINI_MODELS = "gemini-3.8-flash,gemini-3.6-flash,gemini-2.5-flash"
+
 # Fallback cap when user overrides feed list via env without specifying caps.
 OVERRIDE_DEFAULT_CAP = 6
 
@@ -34,7 +38,7 @@ class Config:
     feeds_vn: list[Feed]
     feeds_eng: list[Feed]
     top_n: int
-    gemini_model: str
+    gemini_models: list[str]
     lookback_hours: int
 
 
@@ -70,6 +74,6 @@ def load() -> Config:
         feeds_vn=_feeds("RSS_URLS_VN", DEFAULT_VN_FEEDS),
         feeds_eng=_feeds("RSS_URLS_ENG", DEFAULT_ENG_FEEDS),
         top_n=int(os.environ.get("TOP_N", "7")),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+        gemini_models=[m.strip() for m in os.environ.get("GEMINI_MODELS", DEFAULT_GEMINI_MODELS).split(",") if m.strip()],
         lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
     )

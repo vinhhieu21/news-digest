@@ -18,7 +18,7 @@ Cloudflare cron 02:00 UTC (trigger/)
   │     feedparser × 4 topic feeds (kinh-doanh, so-hoa, thoi-su, suc-khoe)
   │     → up to 6-8 recent candidates per feed → merge → dedupe by URL
   │     → httpx + trafilatura (concurrent body extraction, retries on 5xx/429)
-  │     → Gemini 3.8 Flash picks the TOP_N most important, topic-balanced,
+  │     → Gemini 3.8 Flash (falls back to 3.6 / 2.5 Flash) picks the TOP_N most important, topic-balanced,
   │       and summarizes them (Vietnamese prompt, schema-enforced JSON)
   │     → Telegram HTML message (chunked if >4000 chars)
   └── ENG bucket (same flow, BBC business/tech/world/health, English prompt)
@@ -99,7 +99,7 @@ This dispatches the real workflow, which posts to the group.
 | `RSS_URLS_VN` | VnExpress kinh-doanh/so-hoa/thoi-su/suc-khoe | comma-separated, optional `url\|cap` (cap = candidates pulled, default 6) |
 | `RSS_URLS_ENG` | BBC business/technology/world/health + HN | comma-separated, optional `url\|cap` |
 | `TOP_N` | 7 | stories Gemini picks per bucket |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | free tier; Pro models have no free quota |
+| `GEMINI_MODELS` | `gemini-3.8-flash,gemini-3.6-flash,gemini-2.5-flash` | tried in order, next one after 3 failed attempts (3.8 Flash often returns 503 under load); all free tier, Pro models have no free quota |
 | `LOOKBACK_HOURS` | 24 | window size |
 
 ## Default feeds
@@ -123,6 +123,6 @@ Gemini then picks the most important `TOP_N` across all of them, aiming for abou
 ## Notes
 
 - When the fine-grained token expires, dispatches fail with 401 and the late fallback takes over; rotate it with `wrangler secret put GITHUB_TOKEN`.
-- Two Gemini calls per day, well within the free tier.
+- Two Gemini calls per day (more on retries or fallback), well within the free tier.
 - No cross-day dedupe yet; daily 24h window naturally minimizes overlap.
 - To customize: set `RSS_URLS_VN` or `RSS_URLS_ENG` in `.env` or workflow env.

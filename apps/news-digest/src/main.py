@@ -32,7 +32,7 @@ def _run_bucket(cfg: Config, feeds: list[tuple[str, int]], locale: Locale, date:
         log.warning("[%s] no articles with usable content after extraction; skipping", label)
         return False
 
-    digest = summarize(articles, cfg.gemini_api_key, cfg.gemini_model, locale, cfg.top_n)
+    digest = summarize(articles, cfg.gemini_api_key, cfg.gemini_models, locale, cfg.top_n)
     html = render_html(digest, articles, date, locale)
     telegram.send(cfg.telegram_bot_token, cfg.telegram_chat_id, html)
     log.info("[%s] sent digest with %d of %d candidates", label, len(digest.items), len(articles))
@@ -41,7 +41,7 @@ def _run_bucket(cfg: Config, feeds: list[tuple[str, int]], locale: Locale, date:
 
 def run() -> int:
     cfg = load()
-    log.info("Config loaded: model=%s top_n=%d", cfg.gemini_model, cfg.top_n)
+    log.info("Config loaded: models=%s top_n=%d", ",".join(cfg.gemini_models), cfg.top_n)
     date = datetime.now(tz=ZoneInfo("Asia/Ho_Chi_Minh"))
 
     buckets: list[tuple[Locale, list[str], str]] = [

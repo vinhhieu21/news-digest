@@ -37,8 +37,8 @@ jobs:
     needs: guard
     if: ${{ !cancelled() && needs.guard.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
-    # Worst case is two buckets each retrying a slow Gemini call three times.
-    timeout-minutes: 15
+    # Worst case is two buckets each walking the whole Gemini model list.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/news-digest
@@ -60,8 +60,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           # Same group chat as spending-bot (apps/spending-bot/wrangler.toml).
           TELEGRAM_CHAT_ID: "-1001551080059"
-          # Leave feed vars unset to use defaults in src/config.py.
+          # Leave feed and model vars unset to use defaults in src/config.py.
           TOP_N: "7"
-          GEMINI_MODEL: gemini-3.8-flash
           LOOKBACK_HOURS: "24"
         run: python -m src.main
