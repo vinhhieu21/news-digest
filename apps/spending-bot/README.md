@@ -11,7 +11,10 @@ A Telegram bot for one friend group. Members log spending with `/add`, check tot
 | `/daily on\|off` | | Turns the 21:00 ICT nightly recap on or off |
 | `/help` | | Lists the commands |
 
-Amounts: `50k`, `32.5k`, `1tr2` (1,200,000), `1.5tr`, `2m`, `1.250.000`, `50000`. A bare number under 1,000 is rejected. The valid range is 1,000đ to 100,000,000đ.
+Amounts: `50k`, `32.5k`, `1tr2` (1,200,000), `1.5tr`, `2m`, `1.250.000`, `50000`.
+A space before the unit also works, e.g. `50 nghìn`, `2 tr`, `1,5 triệu`.
+A bare number under 1,000 is rejected.
+The valid range is 1,000đ to 100,000,000đ.
 
 ## Layout
 

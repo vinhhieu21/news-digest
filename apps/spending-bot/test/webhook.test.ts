@@ -154,6 +154,14 @@ describe("commands", () => {
     expect(sent[0]!.body).toMatchObject({ chat_id: GROUP, parse_mode: "HTML", reply_parameters: { message_id: 1001 } });
   });
 
+  it("/add accepts a space between the amount and its unit", async () => {
+    const reply = await send("/add 50 nghìn cafe");
+    expect(await liveExpenses()).toEqual([
+      { user_id: AN.id, amount: 50_000, note: "cafe", spent_on: "2026-10-08", message_id: 1001 },
+    ]);
+    expect(reply).toBe("Đã ghi 50.000đ · cafe · An\nTháng 10 của bạn: 50.000đ");
+  });
+
   it("/add rejects bad input and saves nothing", async () => {
     expect(await send("/add 50 cafe")).toContain("50k");
     expect(await send("/add cafe 50k")).toContain("Cách dùng");

@@ -61,6 +61,71 @@ describe("parseAmount", () => {
   });
 });
 
+describe("parseAdd: unit separated from the amount by a space", () => {
+  const joined: [string, string][] = [
+    ["50 nghìn cafe", "50nghìn cafe"],
+    ["2 tr tiền nhà", "2tr tiền nhà"],
+    ["1,5 triệu vé máy bay", "1,5triệu vé máy bay"],
+    ["50 k cafe", "50k cafe"],
+    ["50 ngàn cafe", "50ngàn cafe"],
+    ["50 nghin cafe", "50nghin cafe"],
+    ["50 ngan cafe", "50ngan cafe"],
+    ["2 trieu thuê", "2trieu thuê"],
+    ["2 m thuê", "2m thuê"],
+    ["50 NGHÌN cafe", "50NGHÌN cafe"],
+    ["50 K cafe", "50K cafe"],
+    ["50 nghìn cafe hôm qua", "50nghìn cafe hôm qua"],
+    ["50 nghìn", "50nghìn"],
+    ["  50   nghìn   cafe  ", "50nghìn cafe"],
+  ];
+  it.each(joined)("%s equals %s", (spaced, unspaced) => {
+    const result = parseAdd(spaced, TODAY);
+    expect(result.ok).toBe(true);
+    expect(result).toEqual(parseAdd(unspaced, TODAY));
+  });
+
+  it("gives the expected values for the user examples", () => {
+    expect(parseAdd("50 nghìn cafe", TODAY)).toEqual({ ok: true, amount: 50_000, note: "cafe", spentOn: TODAY });
+    expect(parseAdd("2 tr tiền nhà", TODAY)).toEqual({ ok: true, amount: 2_000_000, note: "tiền nhà", spentOn: TODAY });
+    expect(parseAdd("1,5 triệu vé máy bay", TODAY)).toEqual({
+      ok: true,
+      amount: 1_500_000,
+      note: "vé máy bay",
+      spentOn: TODAY,
+    });
+    expect(parseAdd("50 nghìn cafe hôm qua", TODAY)).toEqual({
+      ok: true,
+      amount: 50_000,
+      note: "cafe",
+      spentOn: "2026-10-07",
+    });
+  });
+
+  it("does not join a note that only starts with unit letters", () => {
+    expect(parseAdd("50000 ngân hàng", TODAY)).toEqual({ ok: true, amount: 50_000, note: "ngân hàng", spentOn: TODAY });
+    expect(parseAdd("50000 trà sữa", TODAY)).toEqual({ ok: true, amount: 50_000, note: "trà sữa", spentOn: TODAY });
+    expect(parseAdd("50000 kem", TODAY)).toEqual({ ok: true, amount: 50_000, note: "kem", spentOn: TODAY });
+  });
+
+  it("keeps inputs that already parse: a valid amount is never joined with a unit-like note", () => {
+    expect(parseAdd("50000 ngan hang", TODAY)).toEqual({ ok: true, amount: 50_000, note: "ngan hang", spentOn: TODAY });
+    expect(parseAdd("1500 k", TODAY)).toEqual({ ok: true, amount: 1_500, note: "k", spentOn: TODAY });
+    expect(parseAdd("2000 m", TODAY)).toEqual({ ok: true, amount: 2_000, note: "m", spentOn: TODAY });
+  });
+
+  it("reports the joined result's reason when the join fails", () => {
+    expect(parseAdd("0,5 nghìn", TODAY)).toEqual({ ok: false, reason: "out_of_range" });
+  });
+
+  it("keeps the needs_unit hint for a small number followed by a plain note", () => {
+    expect(parseAdd("50 cafe", TODAY)).toEqual({ ok: false, reason: "needs_unit" });
+  });
+
+  it("does not join when the first token already has a unit", () => {
+    expect(parseAdd("50k k", TODAY)).toEqual({ ok: true, amount: 50_000, note: "k", spentOn: TODAY });
+  });
+});
+
 describe("extractDate", () => {
   it("accepts unaccented and short forms of yesterday", () => {
     expect(extractDate("hom qua cafe", TODAY)).toEqual({ ok: true, spentOn: "2026-10-07", note: "cafe" });

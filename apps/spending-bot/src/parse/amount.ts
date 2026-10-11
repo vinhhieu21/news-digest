@@ -10,6 +10,12 @@ export type AmountResult =
 const THOUSAND_UNITS = ["k", "nghìn", "ngàn", "nghin", "ngan"];
 const MILLION_UNITS = ["tr", "triệu", "trieu", "m"];
 
+/** True if the word is exactly a thousand/million unit ("k", "nghìn", "tr", ...), case-insensitive. */
+export function isUnitWord(word: string): boolean {
+  const w = word.normalize("NFC").toLowerCase();
+  return THOUSAND_UNITS.includes(w) || MILLION_UNITS.includes(w);
+}
+
 // "1tr2" = 1.200.000, "1tr25" = 1.250.000: digits after "tr" continue the millions.
 const MILLION_SHORTHAND = /^(\d+)(?:tr|triệu|trieu)(\d{1,3})$/;
 // "50k", "32.5k", "32,5k", "1.5tr", "2m"

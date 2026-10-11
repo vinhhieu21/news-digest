@@ -1,6 +1,6 @@
 // Pure parser for the full `/add <amount> [note] [date]` argument string.
 
-import { parseAmount } from "./amount";
+import { isUnitWord, parseAmount } from "./amount";
 import { extractDate } from "./date";
 
 export type AddResult =
@@ -11,8 +11,16 @@ export function parseAdd(args: string, today: string): AddResult {
   const trimmed = args.trim();
   if (trimmed === "") return { ok: false, reason: "missing" };
 
-  const [amountToken = "", ...rest] = trimmed.split(/\s+/);
-  const amount = parseAmount(amountToken);
+  const [first = "", ...afterFirst] = trimmed.split(/\s+/);
+  // "50 nghìn cafe" means "50nghìn cafe". Join only when the first token alone is not an
+  // amount, so "50000 ngan hang" stays 50.000đ with the note "ngan hang".
+  let amount = parseAmount(first);
+  let rest = afterFirst;
+  const second = afterFirst[0];
+  if (!amount.ok && second !== undefined && isUnitWord(second)) {
+    amount = parseAmount(first + second);
+    rest = afterFirst.slice(1);
+  }
   if (!amount.ok) return amount;
 
   const date = extractDate(rest.join(" "), today);
