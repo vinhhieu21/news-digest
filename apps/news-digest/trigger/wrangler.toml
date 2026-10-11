@@ -1,0 +1,17 @@
+name = "news-digest-trigger"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[observability]
+enabled = true
+
+[vars]
+# Workflow to start. GitHub's own `schedule:` runs ~6h late, so this Worker's
+# cron is the primary trigger; digest.yml keeps a guarded schedule as fallback.
+GITHUB_REPO = "vinhhieu21/telegram-bot"
+GITHUB_WORKFLOW = "digest.yml"
+GITHUB_REF = "main"
+
+[triggers]
+# Cron runs in UTC; ICT = UTC+7. 02:00 UTC = 09:00 ICT.
+crons = ["0 2 * * *"]

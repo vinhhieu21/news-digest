@@ -17,7 +17,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
-    directory: /apps/spending-bot
+    directories: [/apps/spending-bot, /apps/news-digest/trigger]
     schedule:
       interval: weekly
     groups:

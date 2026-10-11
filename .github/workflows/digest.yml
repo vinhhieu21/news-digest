@@ -1,16 +1,41 @@
 name: daily-news-digest
 
 on:
+  # The primary trigger is the news-digest-trigger Worker (apps/news-digest/trigger),
+  # which dispatches this workflow at 09:00 ICT. GitHub's own schedule runs ~6h late,
+  # so it is only a fallback for days the dispatch didn't happen or the run failed.
   schedule:
-    # 02:00 UTC == 09:00 Asia/Ho_Chi_Minh
-    - cron: "0 2 * * *"
+    - cron: "30 2 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  guard:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Skip when another run on main today (ICT) succeeded or is still going.
+        run: |
+          today=$(TZ=Asia/Ho_Chi_Minh date +%F)
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow digest.yml --branch main \
+            --created ">=${today}T00:00:00+07:00" --json databaseId,status,conclusion \
+            -q "[.[] | select(.databaseId != ${GITHUB_RUN_ID}) | select(.status != \"completed\" or .conclusion == \"success\")] | length")
+          echo "other runs today: $n"
+          echo "skip=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   run:
+    needs: guard
+    if: ${{ !cancelled() && needs.guard.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

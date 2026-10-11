@@ -6,13 +6,14 @@ Daily news digest, posted as two Telegram messages to the same group chat as spe
 
 Topic focus (both buckets): **finance · tech · politics · health**.
 
-Runs on GitHub Actions, scheduled for 09:00 Asia/Ho_Chi_Minh.
+Runs on GitHub Actions at 09:00 Asia/Ho_Chi_Minh, started by a Cloudflare Worker cron (`trigger/`).
 It sends as `@nth1bot`, the same bot as spending-bot, which is already in the group.
 
 ## Architecture
 
 ```
-cron 02:00 UTC
+Cloudflare cron 02:00 UTC (trigger/)
+  → GitHub API workflow_dispatch → digest.yml (starts within seconds)
   ├── VN bucket
   │     feedparser × 4 topic feeds (kinh-doanh, so-hoa, thoi-su, suc-khoe)
   │     → 2 per feed → merge → dedupe by URL → cap TOP_N
@@ -23,6 +24,14 @@ cron 02:00 UTC
 ```
 
 Buckets isolated: one failure doesn't block the other.
+
+### Why a Cloudflare trigger
+
+GitHub's own `schedule:` ran 5.5-6.5 hours late every day, so the digest landed around 15:00 ICT.
+Cloudflare crons fire on time, and a dispatched run starts within seconds.
+`digest.yml` still has a `schedule:` at 02:30 UTC as a fallback.
+Its `guard` job skips the run if a run on `main` today (ICT) already succeeded or is in progress, so a working trigger never causes a duplicate post.
+If the dispatch fails or the dispatched run fails, the fallback still posts, just late.
 
 ## Setup
 
@@ -63,6 +72,22 @@ gh secret set TELEGRAM_BOT_TOKEN --body "$TELEGRAM_BOT_TOKEN"
 gh workflow run daily-news-digest
 ```
 
+### 5. Trigger Worker
+
+`trigger/` is a Cloudflare Worker that deploys from `.github/workflows/news-digest-trigger.yml` on every push to `main` that touches it, after tests pass.
+It needs one secret: a fine-grained GitHub token limited to this repo, with **Actions: Read and write**.
+
+```bash
+cd apps/news-digest/trigger
+npm ci
+npx wrangler secret put GITHUB_TOKEN    # paste the fine-grained token
+npm test
+```
+
+Check it in the Cloudflare dashboard under Workers → news-digest-trigger → Logs, or run `npx wrangler tail`.
+To try it locally, put a token in `.dev.vars`, run `npm run dev`, then open `http://localhost:8787/__scheduled`.
+This dispatches the real workflow, which posts to the group.
+
 ## Config (env vars)
 
 | Var | Default | Notes |
@@ -93,7 +118,7 @@ gh workflow run daily-news-digest
 
 ## Notes
 
-- GitHub Actions cron can lag by minutes to hours under load; delivery time is best effort.
+- When the fine-grained token expires, dispatches fail with 401 and the late fallback takes over; rotate it with `wrangler secret put GITHUB_TOKEN`.
 - Two Gemini calls per day, well within the free tier.
 - No cross-day dedupe yet; daily 24h window naturally minimizes overlap.
 - To customize: set `RSS_URLS_VN` or `RSS_URLS_ENG` in `.env` or workflow env.
