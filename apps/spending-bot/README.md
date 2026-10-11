@@ -63,6 +63,15 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 Test this in a private group with two accounts before you add the bot to the real group.
 
+### Continuous deploy
+
+After the first deploy, `.github/workflows/spending-bot.yml` applies remote D1 migrations and runs `wrangler deploy` on every push to `main` that touches this app, once typecheck and tests pass.
+You can also start it by hand from the Actions tab (`workflow_dispatch`).
+It needs, in the repo's `production` environment or repo settings:
+
+- `CLOUDFLARE_API_TOKEN` secret: a Cloudflare API token with **Account > Workers Scripts > Edit** and **Account > D1 > Edit**.
+- `CLOUDFLARE_ACCOUNT_ID` variable: the account id from `npx wrangler whoami`.
+
 ## LLM features (free, optional)
 
 Two features use [Workers AI](https://developers.cloudflare.com/workers-ai/) through the `AI` binding. It needs no API key, and the Workers Free plan includes a daily allowance (10,000 Neurons, reset at 00:00 UTC). Past the allowance, requests fail instead of being billed. On Workers Paid, usage above the allowance is billed.

@@ -6,6 +6,7 @@ on:
     paths: ["apps/spending-bot/**", ".github/workflows/spending-bot.yml"]
   pull_request:
     paths: ["apps/spending-bot/**", ".github/workflows/spending-bot.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,3 +30,31 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    concurrency:
+      group: spending-bot-deploy
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: apps/spending-bot
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/spending-bot/package-lock.json
+
+      - run: npm ci
+      - run: npm run db:migrate:remote
+      - run: npm run deploy

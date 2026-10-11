@@ -12,7 +12,7 @@ Personal Telegram bots, one folder per service. They share no code. Each app has
 ```
 .github/
   workflows/digest.yml        news-digest daily run
-  workflows/spending-bot.yml  spending-bot typecheck + tests on changes
+  workflows/spending-bot.yml  spending-bot typecheck + tests, deploy on main
   workflows/keepalive.yml     keeps scheduled workflows from being auto-paused
   dependabot.yml              actions, pip (news-digest), npm (spending-bot)
 apps/
@@ -23,4 +23,6 @@ apps/
 ## Deploys
 
 - **news-digest:** runs from GitHub Actions. The secrets are `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-- **spending-bot:** deploy it by hand with `cd apps/spending-bot && npm run deploy`. Its secrets live in Cloudflare (`wrangler secret put`), not in GitHub.
+- **spending-bot:** deploys from GitHub Actions on every push to `main` that touches `apps/spending-bot`, after tests pass.
+  GitHub holds only the `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` variable.
+  The bot's own secrets live in Cloudflare (`wrangler secret put`), not in GitHub.
