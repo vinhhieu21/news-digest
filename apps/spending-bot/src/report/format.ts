@@ -59,19 +59,29 @@ export function plainDisplayNames(members: MemberName[]): Map<number, string> {
   return names;
 }
 
-export function addedMessage(opts: {
+interface SavedMessageOpts {
   expense: ExpenseView;
   name: string;
   today: string;
   month: YearMonth;
   monthTotal: number;
-}): string {
+}
+
+export function addedMessage(opts: SavedMessageOpts): string {
+  return savedMessage("Đã ghi", opts);
+}
+
+export function updatedMessage(opts: SavedMessageOpts): string {
+  return savedMessage("Đã sửa", opts);
+}
+
+function savedMessage(verb: string, opts: SavedMessageOpts): string {
   const { expense, name, today, month, monthTotal } = opts;
   const parts = [formatVnd(expense.amount)];
   if (expense.note) parts.push(escapeHtml(expense.note));
   if (expense.spent_on !== today) parts.push(formatDayMonth(expense.spent_on));
   parts.push(escapeHtml(name));
-  return `Đã ghi ${parts.join(" · ")}\nTháng ${month.month} của bạn: ${formatVnd(monthTotal)}`;
+  return `${verb} ${parts.join(" · ")}\nTháng ${month.month} của bạn: ${formatVnd(monthTotal)}`;
 }
 
 export function undoneMessage(expense: ExpenseView): string {
@@ -166,9 +176,13 @@ export const ADD_ERRORS = {
   invalid_date: "Ngày không hợp lệ. Dùng dd/mm (ví dụ 05/10) hoặc \"hôm qua\".",
 } as const;
 
+export const EDIT_KEPT = "Khoản chi cũ được giữ nguyên.";
+export const EDIT_UNDONE = "Khoản chi này đã bị xoá bằng /undo nên không sửa được. Gửi /add mới nếu muốn ghi lại.";
+
 export const HELP_MESSAGE = [
   "<b>Các lệnh</b>",
   "/add 50k cafe sáng — ghi một khoản chi (thêm \"hôm qua\" hoặc 05/10 để đổi ngày)",
+  "Gõ sai thì sửa lại tin nhắn /add, bot sẽ cập nhật khoản chi.",
   "/check — tổng chi từ đầu tháng",
   "/summary 9 — tổng kết một tháng",
   "/undo — xoá khoản chi gần nhất của bạn (trả lời tin nhắn /add để xoá đúng khoản đó)",

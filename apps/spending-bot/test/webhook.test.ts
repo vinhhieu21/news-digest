@@ -2,6 +2,7 @@ import { createExecutionContext, createScheduledController, waitOnExecutionConte
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { DAILY_CRON, MONTHLY_CRON } from "../src/index";
+import { EDIT_UNDONE } from "../src/report/format";
 import type { TgChat, TgMessage, TgUpdate } from "../src/telegram";
 
 const GROUP = -100123;
@@ -55,8 +56,13 @@ function messageUpdate(text: string, from = AN, chat: TgChat = { id: GROUP, type
   const id = nextUpdateId++;
   return {
     update_id: id,
-    message: { message_id: 1000 + id, from, chat, date: 0, text },
+    message: { message_id: 1000 + id, from, chat, date: Math.floor(Date.now() / 1000), text },
   };
+}
+
+/** The same message after the user edited its text (same message_id and original date, new update_id). */
+function editUpdate(original: TgUpdate, text: string, editDate = Math.floor(Date.now() / 1000)): TgUpdate {
+  return { update_id: nextUpdateId++, edited_message: { ...original.message!, text, edit_date: editDate } };
 }
 
 async function post(update: unknown, secret = "test-secret"): Promise<Response> {
@@ -74,15 +80,27 @@ async function post(update: unknown, secret = "test-secret"): Promise<Response> 
   return res;
 }
 
-/** Sends `text` and returns the bot's reply. `extra` is merged into the message (e.g. reply_to_message). */
-async function send(text: string, from = AN, extra: Partial<TgMessage> = {}): Promise<string> {
+/** Posts the update and returns the text of the first message the bot sent ("" if none). */
+async function sendUpdate(update: TgUpdate): Promise<string> {
   sent = [];
-  const update = messageUpdate(text, from);
-  Object.assign(update.message!, extra);
   const res = await post(update);
   expect(res.status).toBe(200);
   const reply = sent.find((s) => s.method === "sendMessage");
   return String(reply?.body.text ?? "");
+}
+
+/** Sends `text` and returns the bot's reply. `extra` is merged into the message (e.g. reply_to_message). */
+async function send(text: string, from = AN, extra: Partial<TgMessage> = {}): Promise<string> {
+  const update = messageUpdate(text, from);
+  Object.assign(update.message!, extra);
+  return sendUpdate(update);
+}
+
+async function allExpenses() {
+  const { results } = await env.DB.prepare(
+    "SELECT amount, note, spent_on, category, message_id, deleted_at IS NOT NULL AS deleted FROM expenses ORDER BY id",
+  ).all();
+  return results;
 }
 
 async function liveExpenses() {
@@ -337,6 +355,196 @@ describe("categories (Workers AI stubbed)", () => {
     );
     expect(res.status).toBe(200);
     expect(aiCalls).toHaveLength(0);
+  });
+});
+
+describe("editing /add", () => {
+  it("updates amount, note and date and replies with 'Đã sửa'", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+
+    const reply = await sendUpdate(editUpdate(original, "/add 60k phở hôm qua"));
+    expect(reply).toBe("Đã sửa 60.000đ · phở · 07/10 · An\nTháng 10 của bạn: 60.000đ");
+    expect(sent[0]!.body).toMatchObject({ reply_parameters: { message_id: 1001 } });
+    expect(await liveExpenses()).toEqual([
+      { user_id: AN.id, amount: 60_000, note: "phở", spent_on: "2026-10-07", message_id: 1001 },
+    ]);
+
+    expect(await sendUpdate(editUpdate(original, "/add 70k phở"))).toBe("Đã sửa 70.000đ · phở · An\nTháng 10 của bạn: 70.000đ");
+    expect(await liveExpenses()).toEqual([
+      { user_id: AN.id, amount: 70_000, note: "phở", spent_on: "2026-10-08", message_id: 1001 },
+    ]);
+  });
+
+  it("ignores an edit that is older than one already applied", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    const now = Math.floor(Date.now() / 1000);
+
+    expect(await sendUpdate(editUpdate(original, "/add 70k phở", now + 20))).toMatch(/^Đã sửa 70.000đ/);
+    expect(await sendUpdate(editUpdate(original, "/add 60k phở", now + 10))).toBe("");
+    expect(await liveExpenses()).toEqual([
+      { user_id: AN.id, amount: 70_000, note: "phở", spent_on: "2026-10-08", message_id: 1001 },
+    ]);
+  });
+
+  it("does not claim an old entry was kept when the original /add was rejected", async () => {
+    const original = messageUpdate("/add 50 cafe");
+    await sendUpdate(original);
+    expect(await sendUpdate(editUpdate(original, "/add 60 cafe"))).not.toContain("giữ nguyên");
+  });
+
+  it("stores updated_at only for edited expenses", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    const before = await env.DB.prepare("SELECT updated_at FROM expenses").first();
+    expect(before).toEqual({ updated_at: null });
+    await sendUpdate(editUpdate(original, "/add 60k cafe"));
+    const after = await env.DB.prepare("SELECT updated_at FROM expenses").first();
+    expect(after).toEqual({ updated_at: "2026-10-08T03:00:00.000Z" });
+  });
+
+  it("counts relative dates from the day the message was sent, not edited", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    vi.setSystemTime(new Date("2026-10-09T03:00:00Z"));
+
+    const reply = await sendUpdate(editUpdate(original, "/add 60k cafe"));
+    expect(reply).toBe("Đã sửa 60.000đ · cafe · 08/10 · An\nTháng 10 của bạn: 60.000đ");
+    expect(await liveExpenses()).toEqual([
+      { user_id: AN.id, amount: 60_000, note: "cafe", spent_on: "2026-10-08", message_id: 1001 },
+    ]);
+  });
+
+  it("keeps the category when the note is unchanged and re-categorises when it changes", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    expect((await allExpenses()).map((e) => e.category)).toEqual(["an_uong"]);
+
+    // Drop the cache and fail the model so only the CASE in the upsert can keep the category.
+    await env.DB.prepare("DELETE FROM note_categories").run();
+    aiFails = true;
+    await sendUpdate(editUpdate(original, "/add 60k cafe"));
+    expect((await allExpenses()).map((e) => e.category)).toEqual(["an_uong"]);
+    expect(aiCalls).toHaveLength(1);
+    aiFails = false;
+
+    await sendUpdate(editUpdate(original, "/add 60k grab"));
+    expect((await allExpenses()).map((e) => e.category)).toEqual(["di_chuyen"]);
+    expect(aiCalls).toHaveLength(2);
+  });
+
+  it("does not keep the old category when the model fails after a note change", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    expect((await allExpenses()).map((e) => e.category)).toEqual(["an_uong"]);
+
+    aiFails = true;
+    expect(await sendUpdate(editUpdate(original, "/add 50k grab"))).toMatch(/^Đã sửa/);
+    expect(await allExpenses()).toEqual([
+      { amount: 50_000, note: "grab", spent_on: "2026-10-08", category: null, message_id: 1001, deleted: 0 },
+    ]);
+  });
+
+  it("answers an invalid edit with the error and keeps the old entry", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+
+    expect(await sendUpdate(editUpdate(original, "/add 50 cafe"))).toMatch(/50k[\s\S]*\nKhoản chi cũ được giữ nguyên\.$/);
+    expect(await sendUpdate(editUpdate(original, "/add cafe"))).toContain("Cách dùng");
+    expect(await sendUpdate(editUpdate(original, "/add 50k cafe 31/02"))).toContain("Ngày không hợp lệ");
+    expect(await allExpenses()).toEqual([
+      { amount: 50_000, note: "cafe", spent_on: "2026-10-08", category: "an_uong", message_id: 1001, deleted: 0 },
+    ]);
+  });
+
+  it("records an /add that was rejected once the edit fixes it", async () => {
+    const original = messageUpdate("/add 50 cafe");
+    expect(await sendUpdate(original)).toContain("50k");
+    expect(await allExpenses()).toHaveLength(0);
+
+    expect(await sendUpdate(editUpdate(original, "/add 50k cafe"))).toBe("Đã ghi 50.000đ · cafe · An\nTháng 10 của bạn: 50.000đ");
+    expect(await allExpenses()).toEqual([
+      { amount: 50_000, note: "cafe", spent_on: "2026-10-08", category: "an_uong", message_id: 1001, deleted: 0 },
+    ]);
+
+    expect(await sendUpdate(editUpdate(original, "/add 55k cafe"))).toBe("Đã sửa 55.000đ · cafe · An\nTháng 10 của bạn: 55.000đ");
+    expect(await liveExpenses()).toHaveLength(1);
+  });
+
+  it("keeps an expense removed with /undo removed", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    expect(await send("/undo")).toContain("Đã xoá");
+
+    expect(await sendUpdate(editUpdate(original, "/add 60k cafe"))).toBe(EDIT_UNDONE);
+    expect(await liveExpenses()).toEqual([]);
+    expect(await allExpenses()).toEqual([
+      { amount: 50_000, note: "cafe", spent_on: "2026-10-08", category: "an_uong", message_id: 1001, deleted: 1 },
+    ]);
+  });
+
+  it("ignores edits of other commands and edits that stop being /add", async () => {
+    const first = messageUpdate("/add 50k a");
+    await sendUpdate(first);
+    await send("/add 70k b");
+    const undoMsg = messageUpdate("/undo");
+    await sendUpdate(undoMsg);
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([50_000]);
+
+    expect(await sendUpdate(editUpdate(undoMsg, "/undo"))).toBe("");
+    expect(sent).toEqual([]);
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([50_000]);
+
+    await sendUpdate(editUpdate(first, "/check"));
+    expect(sent).toEqual([]);
+    await sendUpdate(editUpdate(first, "50k a"));
+    expect(sent).toEqual([]);
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([50_000]);
+  });
+
+  it("applies the same chat and bot-username rules as messages", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+
+    await sendUpdate(editUpdate(original, "/add@other_bot 60k cafe"));
+    expect(sent).toEqual([]);
+    await sendUpdate(editUpdate(original, "/add@spending_test_bot 65k cafe"));
+    expect(sent[0]!.body.text).toMatch(/^Đã sửa 65\.000đ/);
+    await sendUpdate({ update_id: nextUpdateId++, edited_message: { ...original.message!, from: { ...AN, is_bot: true }, text: "/add 99k x" } });
+    expect(sent).toEqual([]);
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([65_000]);
+
+    const foreign = messageUpdate("/add 50k cafe", AN, { id: -999, type: "group" });
+    await sendUpdate(editUpdate(foreign, "/add 60k cafe"));
+    expect(sent).toEqual([{ method: "leaveChat", body: { chat_id: -999 } }]);
+
+    const dm = messageUpdate("/add 50k cafe", AN, { id: AN.id, type: "private" });
+    await sendUpdate(editUpdate(dm, "/add 60k cafe"));
+    expect(sent).toEqual([]);
+    expect(await allExpenses()).toHaveLength(1);
+  });
+
+  it("processes a re-sent edit once (idempotency)", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    await sendUpdate(original);
+    const edit = editUpdate(original, "/add 60k cafe");
+
+    expect(await sendUpdate(edit)).toMatch(/^Đã sửa 60\.000đ/);
+    expect(await sendUpdate(edit)).toBe("");
+    expect(sent).toEqual([]);
+    expect(await liveExpenses()).toHaveLength(1);
+  });
+
+  it("records the edit when it is processed before its original, and the late original changes nothing", async () => {
+    const original = messageUpdate("/add 50k cafe");
+    expect(await sendUpdate(editUpdate(original, "/add 60k cafe"))).toBe("Đã ghi 60.000đ · cafe · An\nTháng 10 của bạn: 60.000đ");
+
+    expect(await sendUpdate(original)).toBe("");
+    expect(sent).toEqual([]);
+    expect(await allExpenses()).toEqual([
+      { amount: 60_000, note: "cafe", spent_on: "2026-10-08", category: "an_uong", message_id: 1001, deleted: 0 },
+    ]);
   });
 });
 

@@ -20,6 +20,8 @@ export interface TgMessage {
   chat: TgChat;
   date: number;
   text?: string;
+  /** Set on edited messages: Unix time of the edit. */
+  edit_date?: number;
   /** Forum topics: the topic id, which is the id of the topic's opening message. */
   message_thread_id?: number;
   is_topic_message?: boolean;
@@ -35,6 +37,7 @@ export interface TgChatMemberUpdated {
 export interface TgUpdate {
   update_id: number;
   message?: TgMessage;
+  edited_message?: TgMessage;
   my_chat_member?: TgChatMemberUpdated;
 }
 

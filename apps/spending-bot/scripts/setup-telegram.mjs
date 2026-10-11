@@ -35,7 +35,7 @@ async function call(method, body) {
 await call("setWebhook", {
   url: WORKER_URL,
   secret_token: WEBHOOK_SECRET,
-  allowed_updates: ["message", "my_chat_member"],
+  allowed_updates: ["message", "edited_message", "my_chat_member"],
   drop_pending_updates: true,
 });
 

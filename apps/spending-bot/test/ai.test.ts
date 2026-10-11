@@ -102,6 +102,16 @@ describe("categorisation", () => {
     expect(await categories()).toEqual(["an_uong", "khac"]);
   });
 
+  it("does not give the old category to a note edited during the LLM call", async () => {
+    await insertExpenses(["cafe"]);
+    const llm = fakeLlm(async (req) => {
+      await env.DB.prepare("UPDATE expenses SET note = 'grab', category = NULL").run();
+      return keywordClassifier(req);
+    });
+    await categorizePending(env.DB, llm, CHAT, NOW);
+    expect(await categories()).toEqual([null]);
+  });
+
   it("without an LLM only uses the cache", async () => {
     await insertExpenses(["cafe"]);
     expect(await categorizePending(env.DB, null, CHAT, NOW)).toBe(0);

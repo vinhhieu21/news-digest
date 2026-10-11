@@ -40,7 +40,7 @@ export async function categorizePending(
   const updates = pending.flatMap((e) => {
     const key = noteKey(e.note);
     const category = known.get(key) ?? learned.get(key);
-    return category ? [{ id: e.id, category }] : [];
+    return category ? [{ id: e.id, note: e.note, category }] : [];
   });
   await saveCategories(db, learned, updates, nowIso);
   return updates.length;
