@@ -2,7 +2,7 @@ import { createExecutionContext, createScheduledController, waitOnExecutionConte
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { DAILY_CRON, MONTHLY_CRON } from "../src/index";
-import type { TgChat, TgUpdate } from "../src/telegram";
+import type { TgChat, TgMessage, TgUpdate } from "../src/telegram";
 
 const GROUP = -100123;
 const AN = { id: 1, is_bot: false, first_name: "An" };
@@ -74,9 +74,12 @@ async function post(update: unknown, secret = "test-secret"): Promise<Response> 
   return res;
 }
 
-async function send(text: string, from = AN): Promise<string> {
+/** Sends `text` and returns the bot's reply. `extra` is merged into the message (e.g. reply_to_message). */
+async function send(text: string, from = AN, extra: Partial<TgMessage> = {}): Promise<string> {
   sent = [];
-  const res = await post(messageUpdate(text, from));
+  const update = messageUpdate(text, from);
+  Object.assign(update.message!, extra);
+  const res = await post(update);
   expect(res.status).toBe(200);
   const reply = sent.find((s) => s.method === "sendMessage");
   return String(reply?.body.text ?? "");
@@ -180,6 +183,60 @@ describe("commands", () => {
     expect((await liveExpenses()).map((e) => e.amount)).toEqual([50_000, 90_000]);
     await send("/undo");
     expect(await send("/undo")).toContain("không có khoản chi");
+  });
+
+  /** Mimics Telegram's reply_to_message for a message sent earlier in the test. */
+  function replyTo(messageId: number, from = AN, text = ""): Partial<TgMessage> {
+    return { reply_to_message: { message_id: messageId, from, chat: { id: GROUP, type: "supergroup" }, date: 0, text } };
+  }
+
+  it("/undo as a reply to your own /add removes that expense", async () => {
+    await send("/add 50k a"); // message 1001
+    await send("/add 70k b"); // message 1002
+    await send("/add 90k c"); // message 1003
+    expect(await send("/undo", AN, replyTo(1001, AN, "/add 50k a"))).toBe("Đã xoá 50.000đ · a (08/10)");
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([70_000, 90_000]);
+    expect(sent[0]!.body).toMatchObject({ reply_parameters: { message_id: 1004 } });
+
+    // Plain /undo is unchanged: the latest one goes next.
+    expect(await send("/undo")).toBe("Đã xoá 90.000đ · c (08/10)");
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([70_000]);
+  });
+
+  it("/undo as a reply never deletes someone else's expense", async () => {
+    await send("/add 50k a"); // 1001, An
+    await send("/add 90k c", HIEU); // 1002, Hiếu
+    const reply = await send("/undo", AN, replyTo(1002, HIEU, "/add 90k c"));
+    expect(reply).toContain("không phải khoản chi của bạn");
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([50_000, 90_000]);
+  });
+
+  it("/undo as a reply to a non-expense message deletes nothing and says so", async () => {
+    await send("/add 50k a"); // 1001
+    await send("/check"); // 1002, not an expense
+    await send("/add 5 a"); // 1003, rejected, not an expense
+    for (const target of [1002, 1003, 777]) {
+      expect(await send("/undo", AN, replyTo(target))).toContain("không phải khoản chi của bạn");
+    }
+    expect(await liveExpenses()).toHaveLength(1);
+  });
+
+  it("/undo as a reply to an already deleted expense deletes nothing more", async () => {
+    await send("/add 50k a"); // 1001
+    await send("/add 70k b"); // 1002
+    await send("/undo", AN, replyTo(1001));
+    expect(await send("/undo", AN, replyTo(1001))).toContain("không phải khoản chi của bạn");
+    expect((await liveExpenses()).map((e) => e.amount)).toEqual([70_000]);
+  });
+
+  it("/undo in a forum topic without an explicit reply acts as plain /undo", async () => {
+    const topic = { message_thread_id: 500, is_topic_message: true };
+    await send("/add 50k a", AN, { ...topic, ...replyTo(500, AN) });
+    await send("/add 70k b", AN, { ...topic, ...replyTo(500, AN) });
+    expect(await send("/undo", AN, { ...topic, ...replyTo(500, AN) })).toBe("Đã xoá 70.000đ · b (08/10)");
+    // An explicit reply inside the topic still targets that message.
+    expect(await send("/undo", AN, { ...topic, ...replyTo(1001) })).toBe("Đã xoá 50.000đ · a (08/10)");
+    expect(await liveExpenses()).toHaveLength(0);
   });
 
   it("/check totals match a SQL sum", async () => {

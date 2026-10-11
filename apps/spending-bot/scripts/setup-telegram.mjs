@@ -16,7 +16,7 @@ const COMMANDS = [
   { command: "add", description: "Ghi khoản chi: /add 50k cafe sáng" },
   { command: "check", description: "Tổng chi từ đầu tháng" },
   { command: "summary", description: "Tổng kết tháng: /summary 9" },
-  { command: "undo", description: "Xoá khoản chi gần nhất của bạn" },
+  { command: "undo", description: "Xoá khoản chi gần nhất, hoặc trả lời tin /add để xoá khoản đó" },
   { command: "daily", description: "Bật/tắt tổng kết hằng ngày: /daily on" },
   { command: "help", description: "Hướng dẫn" },
 ];

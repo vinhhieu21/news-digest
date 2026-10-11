@@ -20,6 +20,10 @@ export interface TgMessage {
   chat: TgChat;
   date: number;
   text?: string;
+  /** Forum topics: the topic id, which is the id of the topic's opening message. */
+  message_thread_id?: number;
+  is_topic_message?: boolean;
+  reply_to_message?: TgMessage;
 }
 
 export interface TgChatMemberUpdated {

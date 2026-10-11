@@ -68,6 +68,27 @@ export async function undoLastExpense(
     .first<ExpenseView>();
 }
 
+/**
+ * Soft-deletes the live expense created by `messageId`, only if it belongs to `userId`.
+ * Returns it, or null if that message is not one of the user's live expenses.
+ */
+export async function undoExpenseByMessage(
+  db: D1Database,
+  chatId: number,
+  userId: number,
+  messageId: number,
+  nowIso: string,
+): Promise<ExpenseView | null> {
+  return db
+    .prepare(
+      `UPDATE expenses SET deleted_at = ?
+       WHERE chat_id = ? AND user_id = ? AND message_id = ? AND deleted_at IS NULL
+       RETURNING amount, note, spent_on`,
+    )
+    .bind(nowIso, chatId, userId, messageId)
+    .first<ExpenseView>();
+}
+
 export async function userTotal(db: D1Database, chatId: number, userId: number, from: string, to: string): Promise<number> {
   const row = await db
     .prepare(

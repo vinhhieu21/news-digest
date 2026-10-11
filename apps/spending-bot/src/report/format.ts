@@ -171,11 +171,13 @@ export const HELP_MESSAGE = [
   "/add 50k cafe sáng — ghi một khoản chi (thêm \"hôm qua\" hoặc 05/10 để đổi ngày)",
   "/check — tổng chi từ đầu tháng",
   "/summary 9 — tổng kết một tháng",
-  "/undo — xoá khoản chi gần nhất của bạn",
+  "/undo — xoá khoản chi gần nhất của bạn (trả lời tin nhắn /add để xoá đúng khoản đó)",
   "/daily on — bật/tắt tổng kết lúc 21:00",
   "/help — xem hướng dẫn",
 ].join("\n");
 
+export const UNDO_NOT_YOURS =
+  "Tin nhắn này không phải khoản chi của bạn nên không xoá gì. Hãy trả lời đúng tin nhắn /add của bạn.";
 export const DM_NOTICE = "Bot này chỉ hoạt động trong nhóm.";
 export const GENERIC_ERROR = "Có lỗi, thử lại sau";
 

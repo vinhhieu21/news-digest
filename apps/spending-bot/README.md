@@ -7,7 +7,7 @@ A Telegram bot for one friend group. Members log spending with `/add`, check tot
 | `/add <amount> [note] [hôm qua \| dd/mm]` | `/add 50k cafe sáng` | Saves an expense for the sender |
 | `/check` | | Each member's total from the 1st of the month to today, plus today's group total |
 | `/summary [month] [year]` | `/summary 9` | Full summary for one month, with the change vs. the previous month and a breakdown by category |
-| `/undo` | | Soft-deletes the sender's most recent expense |
+| `/undo` | reply `/undo` to your `/add` | Soft-deletes the sender's most recent expense, or, sent as a reply to one of their own `/add` messages, that expense |
 | `/daily on\|off` | | Turns the 21:00 ICT nightly recap on or off |
 | `/help` | | Lists the commands |
 
@@ -92,3 +92,4 @@ Tests stub `env.AI.run` (`remoteBindings: false` in `vitest.config.ts`), so they
 - Until `ALLOWED_CHAT_ID` is set, the bot only logs chat ids. After that it leaves every other group and answers DMs with a one-line notice.
 - Cron schedules are in UTC: `0 14 * * *` is 21:00 ICT (the daily recap, sent only when it is on and there was spending today). `0 2 1 * *` is 09:00 ICT on the 1st (the monthly summary, always sent).
 - Defaults chosen from the plan's open decisions: replies in Vietnamese, any member can run `/daily`, and `/undo` removes your last entry whatever its age.
+- A reply `/undo` only deletes an expense the sender recorded. Replying to anything else (someone else's `/add`, a non-expense message, an already deleted one) deletes nothing and says so. In forum topics, the implicit reply to the topic's opening message counts as a plain `/undo`.
