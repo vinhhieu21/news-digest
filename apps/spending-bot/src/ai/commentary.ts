@@ -68,8 +68,16 @@ export function cleanCommentary(text: string): string {
     .trim();
 }
 
-/** Number tokens in `text` that do not appear in `facts` ("1.250.000", "20", ...). */
+/**
+ * Number tokens in `text` that do not appear in `facts` ("1.250.000", "20", ...).
+ * An ordinal span ("thứ 2") is stripped before extraction only when its rank is
+ * grounded in the facts; an ungrounded rank is a computed statistic and stays
+ * detectable. Stripping the span (not just the number) keeps "gấp 2 lần" visible.
+ */
 export function unknownNumbers(text: string, facts: string): string[] {
   const known = new Set(facts.match(/\d+(?:[.,]\d+)*/g) ?? []);
-  return (text.match(/\d+(?:[.,]\d+)*/g) ?? []).filter((n) => !known.has(n));
+  const scrubbed = text.replace(/(?<=^|\s)(?:thứ|top|hạng|#)\s*(\d{1,2})(?=\s|$|[.,;:!?])/gi, (m, n) =>
+    known.has(n) ? " " : m,
+  );
+  return (scrubbed.match(/\d+(?:[.,]\d+)*/g) ?? []).filter((n) => !known.has(n));
 }

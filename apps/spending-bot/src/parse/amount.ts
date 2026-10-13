@@ -25,7 +25,12 @@ const GROUPED = /^\d{1,3}(?:[.,]\d{3})+$/;
 const PLAIN = /^\d+$/;
 
 export function parseAmount(token: string): AmountResult {
-  const t = token.normalize("NFC").toLowerCase();
+  // A trailing đồng sign is natural input ("50.000đ", "50kđ", "50.000VNĐ"); strip it first.
+  // No valid unit ends in đ/d, so this cannot mangle a real amount.
+  const t = token
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/(vn[dđ]|đ|d)$/, "");
 
   const shorthand = MILLION_SHORTHAND.exec(t);
   if (shorthand) {
