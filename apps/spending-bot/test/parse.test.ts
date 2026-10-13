@@ -16,6 +16,8 @@ describe("parseAdd: plan's Parsing test table", () => {
     ["45k cafe hôm qua", 45_000, "cafe", "2026-10-07"],
     ["120k lẩu 05/10", 120_000, "lẩu", "2026-10-05"],
     ["50kđ cafe", 50_000, "cafe", TODAY],
+    ["50 kđ cafe", 50_000, "cafe", TODAY],
+    ["50.000 đ cafe", 50_000, "cafe", TODAY],
   ])("%s", (input, amount, note, spentOn) => {
     expect(parseAdd(input, TODAY)).toEqual({ ok: true, amount, note, spentOn });
   });
@@ -49,6 +51,8 @@ describe("parseAmount", () => {
     ["50kđ", 50_000],
     ["1.5trđ", 1_500_000],
     ["2mvnd", 2_000_000],
+    ["50.000VNĐ", 50_000],
+    ["50kvnđ", 50_000],
   ])("%s = %d", (token, amount) => {
     expect(parseAmount(token)).toEqual({ ok: true, amount });
   });
@@ -160,6 +164,16 @@ describe("extractDate", () => {
   it("does not treat fractions as dates", () => {
     expect(extractDate("mua 2/3 kg gạo", TODAY)).toEqual({ ok: true, spentOn: TODAY, note: "mua 2/3 kg gạo" });
     expect(extractDate("sữa 2/3 l", TODAY)).toEqual({ ok: true, spentOn: TODAY, note: "sữa 2/3 l" });
+  });
+
+  it.each([
+    ["cân"], ["can"], ["ký"], ["ky"], ["kí"], ["ki"],
+    ["lạng"], ["lang"], ["lít"], ["lit"], ["hộp"], ["hop"],
+    ["gói"], ["goi"], ["chai"], ["lon"], ["con"], ["cái"],
+    ["cai"], ["quả"], ["qua"], ["trái"], ["trai"],
+    ["kg"], ["g"], ["ml"], ["l"], ["km"], ["m"], ["cm"], ["mm"],
+  ])("does not treat 1/2 %s as a date", (unit) => {
+    expect(extractDate(`thịt 1/2 ${unit}`, TODAY)).toEqual({ ok: true, spentOn: TODAY, note: `thịt 1/2 ${unit}` });
   });
 
   it("still finds a real date after a fraction", () => {

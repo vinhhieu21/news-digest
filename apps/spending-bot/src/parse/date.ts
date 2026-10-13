@@ -7,8 +7,10 @@ export type DateResult = { ok: true; spentOn: string; note: string } | { ok: fal
 // Whitespace-delimited, since \b does not treat Vietnamese letters as word characters.
 const YESTERDAY = /(?<=^|\s)(?:hôm qua|hom qua|hqua)(?=\s|$)/i;
 const DAY_MONTH = /(?<=^|\s)(\d{1,2})\/(\d{1,2})(?=\s|$)/g;
-// "mua 2/3 kg gạo": a d/m token followed by a quantity unit is a fraction, not a date.
-const QUANTITY_UNIT = /^\s*(kg|g|ml|l|km|m|cm|mm)(?=\s|$)/i;
+// "mua 2/3 kg gạo", "thịt 1/2 cân": a d/m token followed by a quantity unit is a
+// fraction, not a date. Accented and unaccented forms, since users type both.
+const QUANTITY_UNIT =
+  /^\s*(kg|g|ml|l|km|m|cm|mm|cân|can|ký|ky|kí|ki|lạng|lang|lít|lit|hộp|hop|gói|goi|chai|lon|con|cái|cai|quả|qua|trái|trai)(?=\s|$)/i;
 
 /**
  * Finds an optional date token in `note`, removes it, and returns the expense date.

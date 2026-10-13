@@ -157,8 +157,18 @@ describe("commentary", () => {
   it("finds numbers that are not in the facts", () => {
     expect(unknownNumbers("tăng +250%, 350.000đ trong tháng 9", factsText(facts))).toEqual([]);
     expect(unknownNumbers("khoảng 400.000đ", factsText(facts))).toEqual(["400.000"]);
-    expect(unknownNumbers("đứng thứ 2 về ăn uống, top 3 là giải trí", factsText(facts))).toEqual([]);
     expect(cleanCommentary("# Tiêu đề\n`x`  __y__")).toBe("Tiêu đề x y");
+  });
+
+  it("strips ordinal spans only when the rank is grounded in the facts", () => {
+    // "1" is in the facts: the ordinal span is stripped, nothing invented.
+    expect(unknownNumbers("An đứng thứ 1 với 300.000đ", factsText(facts))).toEqual([]);
+    // "2" is not in the facts: an ungrounded rank is a computed statistic.
+    expect(unknownNumbers("đứng thứ 2 về ăn uống", factsText(facts))).toEqual(["2"]);
+    // Stripping the span must not hide other invented numbers sharing the digit.
+    expect(unknownNumbers("Ăn uống đứng thứ 1, chi gấp 2 lần tháng trước", factsText(facts))).toEqual(["2"]);
+    // No left boundary: "laptop 5" is not an ordinal.
+    expect(unknownNumbers("mua laptop 5", factsText(facts))).toEqual(["5"]);
   });
 });
 

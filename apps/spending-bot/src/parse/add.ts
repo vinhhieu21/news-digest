@@ -7,6 +7,19 @@ export type AddResult =
   | { ok: true; amount: number; note: string; spentOn: string }
   | { ok: false; reason: "missing" | "invalid" | "needs_unit" | "out_of_range" | "invalid_date" };
 
+/** A detached đồng sign: "50.000 đ", "50 kđ". Stripped for the unit join below. */
+function stripDong(word: string): string {
+  return word
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/(vn[dđ]|đ|d)$/, "");
+}
+
+/** True for a bare đồng-sign token ("đ", "d", "vnd", "vnđ"). */
+function isDongWord(word: string): boolean {
+  return /^(vn[dđ]|đ|d)$/.test(word.normalize("NFC").toLowerCase());
+}
+
 export function parseAdd(args: string, today: string): AddResult {
   const trimmed = args.trim();
   if (trimmed === "") return { ok: false, reason: "missing" };
@@ -16,12 +29,16 @@ export function parseAdd(args: string, today: string): AddResult {
   // amount, so "50000 ngan hang" stays 50.000đ with the note "ngan hang".
   let amount = parseAmount(first);
   let rest = afterFirst;
-  const second = afterFirst[0];
+  const secondRaw = afterFirst[0];
+  const second = secondRaw === undefined ? undefined : stripDong(secondRaw);
   if (!amount.ok && second !== undefined && isUnitWord(second)) {
     amount = parseAmount(first + second);
     rest = afterFirst.slice(1);
   }
   if (!amount.ok) return amount;
+
+  // A detached đồng sign right after the amount ("50.000 đ cafe") is not part of the note.
+  if (rest[0] !== undefined && isDongWord(rest[0])) rest = rest.slice(1);
 
   const date = extractDate(rest.join(" "), today);
   if (!date.ok) return date;

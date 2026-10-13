@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -120,15 +121,23 @@ def _thinking_config(model_name: str) -> types.ThinkingConfig:
     return types.ThinkingConfig(thinking_level="low")
 
 
-def _retryable_gemini(exc: BaseException) -> bool:
-    """Retry rate limits and server-side flakiness only.
+class BadModelOutput(RuntimeError):
+    """Stochastic model failure (truncated JSON, unusable picks) - worth retrying."""
 
-    Schema mismatches and empty picks are deterministic — retrying them just
-    burns the backoff budget.
+
+def _retryable_gemini(exc: BaseException) -> bool:
+    """Retry rate limits, server flakiness, transport failures, and stochastic
+    bad model output. Only deterministic client errors fail fast.
     """
+    if isinstance(exc, BadModelOutput):
+        return True
+    if isinstance(exc, httpx.TransportError):
+        return True
     if isinstance(exc, genai_errors.ServerError):
         return True
-    return isinstance(exc, genai_errors.APIError) and exc.code == 429
+    if isinstance(exc, genai_errors.APIError):
+        return exc.code == 429
+    return False
 
 
 @retry(
@@ -152,10 +161,10 @@ def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_cou
     )
     digest = resp.parsed
     if not isinstance(digest, Digest):
-        raise RuntimeError(f"Gemini response did not match schema: {(resp.text or '')[:300]}")
+        raise BadModelOutput(f"Gemini response did not match schema: {(resp.text or '')[:300]}")
     digest.items = _valid_items(digest, article_count, top_n)
     if not digest.items:
-        raise RuntimeError("Gemini returned no usable items")
+        raise BadModelOutput("Gemini returned no usable items")
     return digest
 
 
@@ -178,12 +187,20 @@ def summarize(articles: list[Article], api_key: str, models: list[str], locale: 
 
 
 def render_html(digest: Digest, articles: list[Article], date: datetime, locale: Locale) -> str:
-    # A single runaway item must never defeat _chunk's paragraph-boundary splits:
-    # a hard cut mid-tag would produce invalid HTML and fail the whole send.
-    MAX_ITEM_CHARS = 1500
+    # Caps keep every model-supplied field short enough that _chunk always splits
+    # on paragraph boundaries: a hard cut mid-tag would produce invalid HTML and
+    # fail the whole send.
+    MAX_OVERVIEW_CHARS = 500
+    MAX_HEADLINE_CHARS = 200
+    MAX_SUMMARY_CHARS = 1500
 
     def esc(s: str) -> str:
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    def clip(text: str, limit: int) -> str:
+        # Clip the raw text first: cutting after escaping could split an entity.
+        text = text.strip()
+        return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
     if locale == "vn":
         header = f"<b>📰 Bản tin sáng {date.strftime('%d/%m/%Y')}</b>"
@@ -191,16 +208,14 @@ def render_html(digest: Digest, articles: list[Article], date: datetime, locale:
         header = f"<b>🌍 Morning Brief {date.strftime('%d/%m/%Y')}</b>"
 
     lines = [header]
-    overview = esc(digest.overview.strip())
+    overview = esc(clip(digest.overview, MAX_OVERVIEW_CHARS))
     if overview:
         lines.append(f"<i>{overview}</i>")
 
     for item in digest.items:
         art = articles[item.index - 1]
-        headline = esc(item.headline.strip() or art.title)
-        summary = esc(item.summary.strip())
-        if len(summary) > MAX_ITEM_CHARS:
-            summary = summary[:MAX_ITEM_CHARS].rstrip() + "…"
+        headline = esc(clip(item.headline or art.title, MAX_HEADLINE_CHARS))
+        summary = esc(clip(item.summary, MAX_SUMMARY_CHARS))
         emoji = TOPIC_EMOJI.get(item.topic, TOPIC_EMOJI["other"])
         lines.append(f"{emoji} <b><a href=\"{esc(art.url)}\">{headline}</a></b>\n{summary}")
 
