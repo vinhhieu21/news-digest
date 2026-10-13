@@ -157,6 +157,7 @@ describe("commentary", () => {
   it("finds numbers that are not in the facts", () => {
     expect(unknownNumbers("tăng +250%, 350.000đ trong tháng 9", factsText(facts))).toEqual([]);
     expect(unknownNumbers("khoảng 400.000đ", factsText(facts))).toEqual(["400.000"]);
+    expect(unknownNumbers("đứng thứ 2 về ăn uống, top 3 là giải trí", factsText(facts))).toEqual([]);
     expect(cleanCommentary("# Tiêu đề\n`x`  __y__")).toBe("Tiêu đề x y");
   });
 });

@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Literal
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, Field
-from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import before_sleep_log, retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .fetch import Article
 
@@ -119,6 +120,17 @@ def _thinking_config(model_name: str) -> types.ThinkingConfig:
     return types.ThinkingConfig(thinking_level="low")
 
 
+def _retryable_gemini(exc: BaseException) -> bool:
+    """Retry rate limits and server-side flakiness only.
+
+    Schema mismatches and empty picks are deterministic — retrying them just
+    burns the backoff budget.
+    """
+    if isinstance(exc, genai_errors.ServerError):
+        return True
+    return isinstance(exc, genai_errors.APIError) and exc.code == 429
+
+
 @retry(
     reraise=True,
     before_sleep=before_sleep_log(log, logging.WARNING),
@@ -126,7 +138,7 @@ def _thinking_config(model_name: str) -> types.ThinkingConfig:
     # 503 "high demand" spells on Flash models last tens of seconds, so short
     # backoffs burn every attempt inside the same spell.
     wait=wait_exponential(multiplier=10, min=10, max=60),
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_exception(_retryable_gemini),
 )
 def _call_gemini(client: genai.Client, model_name: str, prompt: str, article_count: int, top_n: int) -> Digest:
     resp = client.models.generate_content(
@@ -166,6 +178,10 @@ def summarize(articles: list[Article], api_key: str, models: list[str], locale: 
 
 
 def render_html(digest: Digest, articles: list[Article], date: datetime, locale: Locale) -> str:
+    # A single runaway item must never defeat _chunk's paragraph-boundary splits:
+    # a hard cut mid-tag would produce invalid HTML and fail the whole send.
+    MAX_ITEM_CHARS = 1500
+
     def esc(s: str) -> str:
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
@@ -182,7 +198,10 @@ def render_html(digest: Digest, articles: list[Article], date: datetime, locale:
     for item in digest.items:
         art = articles[item.index - 1]
         headline = esc(item.headline.strip() or art.title)
+        summary = esc(item.summary.strip())
+        if len(summary) > MAX_ITEM_CHARS:
+            summary = summary[:MAX_ITEM_CHARS].rstrip() + "…"
         emoji = TOPIC_EMOJI.get(item.topic, TOPIC_EMOJI["other"])
-        lines.append(f"{emoji} <b><a href=\"{esc(art.url)}\">{headline}</a></b>\n{esc(item.summary.strip())}")
+        lines.append(f"{emoji} <b><a href=\"{esc(art.url)}\">{headline}</a></b>\n{summary}")
 
     return "\n\n".join(lines)

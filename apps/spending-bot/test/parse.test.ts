@@ -15,6 +15,7 @@ describe("parseAdd: plan's Parsing test table", () => {
     ["1.250.000 điện", 1_250_000, "điện", TODAY],
     ["45k cafe hôm qua", 45_000, "cafe", "2026-10-07"],
     ["120k lẩu 05/10", 120_000, "lẩu", "2026-10-05"],
+    ["50kđ cafe", 50_000, "cafe", TODAY],
   ])("%s", (input, amount, note, spentOn) => {
     expect(parseAdd(input, TODAY)).toEqual({ ok: true, amount, note, spentOn });
   });
@@ -44,6 +45,10 @@ describe("parseAmount", () => {
     ["50000", 50_000],
     ["1000", 1_000],
     ["100tr", 100_000_000],
+    ["50.000đ", 50_000],
+    ["50kđ", 50_000],
+    ["1.5trđ", 1_500_000],
+    ["2mvnd", 2_000_000],
   ])("%s = %d", (token, amount) => {
     expect(parseAmount(token)).toEqual({ ok: true, amount });
   });
@@ -150,5 +155,18 @@ describe("extractDate", () => {
 
   it("does not treat words containing qua as a date", () => {
     expect(extractDate("hoa quả", TODAY)).toEqual({ ok: true, spentOn: TODAY, note: "hoa quả" });
+  });
+
+  it("does not treat fractions as dates", () => {
+    expect(extractDate("mua 2/3 kg gạo", TODAY)).toEqual({ ok: true, spentOn: TODAY, note: "mua 2/3 kg gạo" });
+    expect(extractDate("sữa 2/3 l", TODAY)).toEqual({ ok: true, spentOn: TODAY, note: "sữa 2/3 l" });
+  });
+
+  it("still finds a real date after a fraction", () => {
+    expect(extractDate("mua 2/3 kg gạo 05/10", TODAY)).toEqual({
+      ok: true,
+      spentOn: "2026-10-05",
+      note: "mua 2/3 kg gạo",
+    });
   });
 });

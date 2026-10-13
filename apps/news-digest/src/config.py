@@ -42,6 +42,14 @@ class Config:
     lookback_hours: int
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        raise RuntimeError(f"Env var {name} must be an integer, got {raw!r}")
+
+
 def _feeds(env_name: str, default: list[Feed]) -> list[Feed]:
     """Parse CSV override. Each entry is `url` or `url|cap` (cap defaults to OVERRIDE_DEFAULT_CAP)."""
     raw = os.environ.get(env_name, "").strip()
@@ -54,7 +62,11 @@ def _feeds(env_name: str, default: list[Feed]) -> list[Feed]:
             continue
         if "|" in item:
             url, cap = item.split("|", 1)
-            out.append((url.strip(), int(cap.strip())))
+            try:
+                cap_int = int(cap.strip())
+            except ValueError:
+                raise RuntimeError(f"Invalid cap in {env_name}: {item!r} (expected url|int)")
+            out.append((url.strip(), cap_int))
         else:
             out.append((item, OVERRIDE_DEFAULT_CAP))
     return out
@@ -73,7 +85,7 @@ def load() -> Config:
         telegram_chat_id=req("TELEGRAM_CHAT_ID"),
         feeds_vn=_feeds("RSS_URLS_VN", DEFAULT_VN_FEEDS),
         feeds_eng=_feeds("RSS_URLS_ENG", DEFAULT_ENG_FEEDS),
-        top_n=int(os.environ.get("TOP_N", "7")),
+        top_n=_int_env("TOP_N", 7),
         gemini_models=[m.strip() for m in os.environ.get("GEMINI_MODELS", DEFAULT_GEMINI_MODELS).split(",") if m.strip()],
-        lookback_hours=int(os.environ.get("LOOKBACK_HOURS", "24")),
+        lookback_hours=_int_env("LOOKBACK_HOURS", 24),
     )

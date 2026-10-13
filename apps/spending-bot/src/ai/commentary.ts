@@ -68,8 +68,12 @@ export function cleanCommentary(text: string): string {
     .trim();
 }
 
-/** Number tokens in `text` that do not appear in `facts` ("1.250.000", "20", ...). */
+/**
+ * Number tokens in `text` that do not appear in `facts` ("1.250.000", "20", ...).
+ * Ordinals ("thứ 2", "top 3") cite no new statistics, so they never count as invented.
+ */
 export function unknownNumbers(text: string, facts: string): string[] {
   const known = new Set(facts.match(/\d+(?:[.,]\d+)*/g) ?? []);
+  for (const m of text.matchAll(/(?:thứ|top|hạng|#)\s*(\d{1,2})/gi)) known.add(m[1]!);
   return (text.match(/\d+(?:[.,]\d+)*/g) ?? []).filter((n) => !known.has(n));
 }
