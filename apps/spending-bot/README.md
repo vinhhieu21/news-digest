@@ -1,13 +1,15 @@
 # Telegram Spending Bot (v1)
 
-A Telegram bot for one friend group. Members log spending with `/add`, check totals with `/check` and `/summary`, and get an automatic monthly summary. A nightly recap is optional. It runs on one Cloudflare Worker with D1 storage and costs nothing on the free tiers.
+A Telegram bot for one friend group. Members log spending with `/add`, check their own totals with `/check` and `/summary` (or the whole group's with `/groupcheck` and `/groupsummary`), and get an automatic monthly summary. A nightly recap is optional. It runs on one Cloudflare Worker with D1 storage and costs nothing on the free tiers.
 
 | Command | Example | What it does |
 |---|---|---|
 | `/add <amount> [note] [hôm qua \| dd/mm]` | `/add 50k cafe sáng` | Saves an expense for the sender. Editing the message updates it |
-| `/check` | | Each member's total from the 1st of the month to today, plus today's group total, plus what is left of the budget when one is set |
+| `/check` | | The sender's own total from the 1st of the month to today, plus their total for today |
+| `/groupcheck` | | Each member's total from the 1st of the month to today, plus today's group total, plus what is left of the budget when one is set |
 | `/budget [amount\|off]` | `/budget 5tr` | Sets the group's monthly budget, shows spent and remaining this month, or removes it |
-| `/summary [month] [year]` | `/summary 9` | Full summary for one month, with the change vs. the previous month and a breakdown by category |
+| `/summary [month] [year]` | `/summary 9` | The sender's own summary for one month, with the change vs. the previous month and a breakdown by category |
+| `/groupsummary [month] [year]` | `/groupsummary 9` | The same for the whole group, ranked by member |
 | `/undo` | reply `/undo` to your `/add` | Soft-deletes the sender's most recent expense, or, sent as a reply to one of their own `/add` messages, that expense |
 | `/daily on\|off` | | Turns the 21:00 ICT nightly recap on or off |
 | `/help` | | Lists the commands |
@@ -82,8 +84,8 @@ It needs, in the repo's `production` environment or repo settings:
 
 Two features use [Workers AI](https://developers.cloudflare.com/workers-ai/) through the `AI` binding. It needs no API key, and the Workers Free plan includes a daily allowance (10,000 Neurons, reset at 00:00 UTC). Past the allowance, requests fail instead of being billed. On Workers Paid, usage above the allowance is billed.
 
-- **Categories.** After each `/add` the bot replies first. Then it asks the model to put the note into one of the fixed categories in `src/ai/categories.ts`. The answer is cached per note, so `cafe` is classified only once. If the call fails, the expense stays uncategorised and the daily cron retries it. `/summary` and the monthly summary show totals per category; anything not classified yet is listed as "Chưa phân loại".
-- **Monthly commentary.** The monthly summary ends with 2–3 sentences from the model. The model only receives the totals computed in SQL. A reply that cites a number not in those totals is dropped. If the commentary fails, the summary is still sent, with a line saying the commentary is unavailable. `/summary` never calls the model for commentary.
+- **Categories.** After each `/add` the bot replies first. Then it asks the model to put the note into one of the fixed categories in `src/ai/categories.ts`. The answer is cached per note, so `cafe` is classified only once. If the call fails, the expense stays uncategorised and the daily cron retries it. `/summary`, `/groupsummary` and the monthly summary show totals per category; anything not classified yet is listed as "Chưa phân loại".
+- **Monthly commentary.** The monthly summary ends with 2–3 sentences from the model. The model only receives the totals computed in SQL. A reply that cites a number not in those totals is dropped. If the commentary fails, the summary is still sent, with a line saying the commentary is unavailable. `/summary` and `/groupsummary` never call the model for commentary.
 
 The model is `LLM_MODEL` in `wrangler.toml` (default: `@cf/aisingapore/gemma-sea-lion-v4-27b-it`, a model tuned for Southeast Asian languages). Set it to `""` to switch both features off. Expense notes, member first names and totals are sent to Workers AI.
 

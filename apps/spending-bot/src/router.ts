@@ -4,17 +4,28 @@
 import type { Llm } from "./ai/llm";
 import { add, editAdd } from "./commands/add";
 import { budget } from "./commands/budget";
-import { check } from "./commands/check";
+import { check, groupCheck } from "./commands/check";
 import type { CommandHandler } from "./commands/context";
 import { daily } from "./commands/daily";
 import { help } from "./commands/help";
-import { summary } from "./commands/summary";
+import { groupSummary, summary } from "./commands/summary";
 import { undo } from "./commands/undo";
 import { upsertMember } from "./db";
 import { DM_NOTICE, GENERIC_ERROR } from "./report/format";
 import type { Telegram, TgChat, TgMessage, TgUpdate } from "./telegram";
 
-const COMMANDS: Record<string, CommandHandler> = { add, budget, check, summary, undo, daily, help, start: help };
+const COMMANDS: Record<string, CommandHandler> = {
+  add,
+  budget,
+  check,
+  groupcheck: groupCheck,
+  summary,
+  groupsummary: groupSummary,
+  undo,
+  daily,
+  help,
+  start: help,
+};
 
 /** Commands that act on an edit of their message. Others ignore edits (an edited /undo must not delete again). */
 const EDIT_COMMANDS: Record<string, CommandHandler> = { add: editAdd };

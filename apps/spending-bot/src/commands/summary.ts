@@ -1,12 +1,44 @@
-import { categoryTotals, groupTotal, memberTotals } from "../db";
-import { USAGE, summaryMessage, type CategoryTotal, type MemberTotal } from "../report/format";
+import { categoryTotals, groupTotal, memberTotals, userStats, userTotal } from "../db";
+import { USAGE, personalSummaryMessage, summaryMessage, type CategoryTotal, type MemberTotal } from "../report/format";
 import { currentMonthIct, monthRange, previousMonth, type YearMonth } from "../time";
 import { reply, type CommandContext } from "./context";
 
+/** /summary: the sender's own spending for one month. */
 export async function summary(ctx: CommandContext): Promise<void> {
   const month = parseMonthArgs(ctx.args, currentMonthIct(ctx.now));
   if (month === null) {
     await reply(ctx, USAGE.summary);
+    return;
+  }
+  const { db, chatId, user } = ctx;
+  const { from, to } = monthRange(month);
+  const prev = monthRange(previousMonth(month));
+  const [stats, previousTotal, categories, previousCategories] = await Promise.all([
+    userStats(db, chatId, user.id, from, to),
+    userTotal(db, chatId, user.id, prev.from, prev.to),
+    categoryTotals(db, chatId, from, to, user.id),
+    categoryTotals(db, chatId, prev.from, prev.to, user.id),
+  ]);
+  await reply(
+    ctx,
+    personalSummaryMessage({
+      name: user.first_name,
+      month,
+      total: stats.total,
+      count: stats.count,
+      maxAmount: stats.max_amount,
+      previousTotal,
+      categories,
+      previousCategories,
+    }),
+  );
+}
+
+/** /groupsummary: every member's spending for one month. */
+export async function groupSummary(ctx: CommandContext): Promise<void> {
+  const month = parseMonthArgs(ctx.args, currentMonthIct(ctx.now));
+  if (month === null) {
+    await reply(ctx, USAGE.groupsummary);
     return;
   }
   await reply(ctx, await buildSummary(ctx.db, ctx.chatId, month));

@@ -89,6 +89,22 @@ export function undoneMessage(expense: ExpenseView): string {
   return `Đã xoá ${formatVnd(expense.amount)}${note} (${formatDayMonth(expense.spent_on)})`;
 }
 
+/** /check: the sender's own month-to-date spending. */
+export function personalCheckMessage(opts: {
+  name: string;
+  month: YearMonth;
+  today: string;
+  total: number;
+  count: number;
+  todayTotal: number;
+}): string {
+  const { name, month, today, total, count, todayTotal } = opts;
+  const header = `Chi tiêu tháng ${month.month} của ${escapeHtml(name)} (đến ${formatDayMonth(today)})`;
+  if (count === 0) return `${header}\nBạn chưa có khoản chi nào.`;
+  return [header, `Tổng: ${formatVnd(total)} (${count} lần)`, `Hôm nay: ${formatVnd(todayTotal)}`].join("\n");
+}
+
+/** /groupcheck: every member's month-to-date spending. */
 export function checkMessage(opts: {
   month: YearMonth;
   today: string;
@@ -153,19 +169,47 @@ export function summaryMessage(opts: {
     `Cả nhóm: ${formatVnd(total)} · so với tháng ${prev}: ${percentChange(total, previousTotal)}`,
   ];
 
-  // Skip the section while nothing is categorised (e.g. LLM disabled).
-  if (categories.some((c) => c.category !== null)) {
-    const previousByKey = new Map(previousCategories.map((c) => [c.category, c.total]));
-    lines.push("", "<b>Theo loại</b>");
-    for (const c of categories) {
-      const change = c.category === null ? "—" : percentChange(c.total, previousByKey.get(c.category) ?? 0);
-      lines.push(`${categoryLabel(c.category)}: ${formatVnd(c.total)}${change === "—" ? "" : ` (${change})`}`);
-    }
-  }
+  lines.push(...categoryLines(categories, previousCategories));
 
   if (commentary) lines.push("", "<b>Nhận xét</b>", escapeHtml(commentary));
   else if (commentary === null) lines.push("", "<i>Không tạo được nhận xét tháng này.</i>");
   return lines.join("\n");
+}
+
+/** /summary: the sender's own spending for one month. */
+export function personalSummaryMessage(opts: {
+  name: string;
+  month: YearMonth;
+  total: number;
+  count: number;
+  maxAmount: number;
+  previousTotal: number;
+  categories: CategoryTotal[];
+  previousCategories: CategoryTotal[];
+}): string {
+  const { name, month, total, count, maxAmount, previousTotal, categories, previousCategories } = opts;
+  const header = `<b>Tổng kết tháng ${month.month}/${month.year} của ${escapeHtml(name)}</b>`;
+  if (count === 0) return `${header}\nBạn không có khoản chi nào.`;
+
+  const prev = month.month === 1 ? 12 : month.month - 1;
+  return [
+    header,
+    `Tổng: ${formatVnd(total)} (${count} lần, lớn nhất ${formatVnd(maxAmount)})`,
+    `So với tháng ${prev}: ${percentChange(total, previousTotal)}`,
+    ...categoryLines(categories, previousCategories),
+  ].join("\n");
+}
+
+/** The "Theo loại" section, preceded by a blank line. Empty while nothing is categorised (e.g. LLM disabled). */
+function categoryLines(categories: CategoryTotal[], previousCategories: CategoryTotal[]): string[] {
+  if (!categories.some((c) => c.category !== null)) return [];
+  const previousByKey = new Map(previousCategories.map((c) => [c.category, c.total]));
+  const lines = ["", "<b>Theo loại</b>"];
+  for (const c of categories) {
+    const change = c.category === null ? "—" : percentChange(c.total, previousByKey.get(c.category) ?? 0);
+    lines.push(`${categoryLabel(c.category)}: ${formatVnd(c.total)}${change === "—" ? "" : ` (${change})`}`);
+  }
+  return lines;
 }
 
 export function dailyRecapMessage(opts: {
@@ -196,6 +240,7 @@ export function usedPercent(spent: number, budget: number): number {
 export const USAGE = {
   add: "Cách dùng: /add &lt;số tiền&gt; [ghi chú] [hôm qua | dd/mm]\nVí dụ: /add 50k cafe sáng",
   summary: "Cách dùng: /summary [tháng] [năm]\nVí dụ: /summary 9",
+  groupsummary: "Cách dùng: /groupsummary [tháng] [năm]\nVí dụ: /groupsummary 9",
   daily: "Cách dùng: /daily on hoặc /daily off",
   budget: "Cách dùng: /budget &lt;số tiền&gt; để đặt, /budget để xem, /budget off để xoá\nVí dụ: /budget 5tr",
 } as const;
@@ -223,9 +268,11 @@ export const HELP_MESSAGE = [
   "<b>Các lệnh</b>",
   "/add 50k cafe sáng - ghi một khoản chi (thêm \"hôm qua\" hoặc 05/10 để đổi ngày)",
   "Gõ sai thì sửa lại tin nhắn /add, bot sẽ cập nhật khoản chi.",
-  "/check - tổng chi từ đầu tháng",
+  "/check - tổng chi của bạn từ đầu tháng",
+  "/groupcheck - tổng chi của cả nhóm từ đầu tháng",
   "/budget 5tr - đặt ngân sách tháng cho nhóm (/budget để xem, /budget off để xoá)",
-  "/summary 9 - tổng kết một tháng",
+  "/summary 9 - tổng kết một tháng của bạn",
+  "/groupsummary 9 - tổng kết một tháng của cả nhóm",
   "/undo - xoá khoản chi gần nhất của bạn (trả lời tin nhắn /add để xoá đúng khoản đó)",
   "/daily on - bật/tắt tổng kết lúc 21:00",
   "/help - xem hướng dẫn",

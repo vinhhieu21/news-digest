@@ -266,12 +266,28 @@ describe("commands", () => {
     expect(await liveExpenses()).toHaveLength(0);
   });
 
-  it("/check totals match a SQL sum", async () => {
+  it("/check shows only the sender's own spending", async () => {
+    await send("/add 2tr thuê", AN);
+    await send("/add 100k cafe hôm qua", AN);
+    await send("/add 1tr25 sửa xe", HIEU);
+    await send("/add 300k vé 05/09", AN); // previous month, excluded
+    expect(await send("/check", AN)).toBe(
+      ["Chi tiêu tháng 10 của An (đến 08/10)", "Tổng: 2.100.000đ (2 lần)", "Hôm nay: 2.000.000đ"].join("\n"),
+    );
+    expect(await send("/check", HIEU)).toBe(
+      ["Chi tiêu tháng 10 của Hiếu (đến 08/10)", "Tổng: 1.250.000đ (1 lần)", "Hôm nay: 1.250.000đ"].join("\n"),
+    );
+    expect(await send("/check", { id: 3, is_bot: false, first_name: "Linh" })).toBe(
+      "Chi tiêu tháng 10 của Linh (đến 08/10)\nBạn chưa có khoản chi nào.",
+    );
+  });
+
+  it("/groupcheck totals match a SQL sum", async () => {
     await send("/add 2tr thuê", AN);
     await send("/add 100k cafe hôm qua", AN);
     await send("/add 1tr25 sửa xe", HIEU);
     await send("/add 300k vé 05/09", HIEU); // previous month, excluded
-    const reply = await send("/check");
+    const reply = await send("/groupcheck");
     expect(reply).toBe(
       ["Chi tiêu tháng 10 (đến 08/10)", "1. An: 2.100.000đ (2 lần)", "2. Hiếu: 1.250.000đ (1 lần)", "Hôm nay: 3.250.000đ · Cả nhóm: 3.350.000đ"].join("\n"),
     );
@@ -281,11 +297,32 @@ describe("commands", () => {
     expect(sum?.s).toBe(3_350_000);
   });
 
-  it("/summary shows a past month with change vs previous", async () => {
+  it("/summary shows only the sender's own month with change vs previous", async () => {
+    await send("/add 100k a 05/08");
+    await send("/add 200k cafe 05/09");
+    await send("/add 100k b 06/09");
+    await send("/add 50k c 06/09", HIEU);
+    expect(await send("/summary 9")).toBe(
+      [
+        "<b>Tổng kết tháng 9/2026 của An</b>",
+        "Tổng: 300.000đ (2 lần, lớn nhất 200.000đ)",
+        "So với tháng 8: +200%",
+        "",
+        "<b>Theo loại</b>",
+        "Ăn uống: 200.000đ",
+        "Khác: 100.000đ (0%)",
+      ].join("\n"),
+    );
+    expect(await send("/summary 8", HIEU)).toBe("<b>Tổng kết tháng 8/2026 của Hiếu</b>\nBạn không có khoản chi nào.");
+    expect(aiCalls.every((c) => c.system.includes("phân loại"))).toBe(true); // /summary never asks for commentary
+    expect(await send("/summary 13")).toContain("Cách dùng: /summary");
+  });
+
+  it("/groupsummary shows a past month with change vs previous", async () => {
     await send("/add 100k a 05/08");
     await send("/add 300k b 05/09");
     await send("/add 50k c 06/09", HIEU);
-    const reply = await send("/summary 9");
+    const reply = await send("/groupsummary 9");
     expect(reply).toBe(
       [
         "<b>Tổng kết tháng 9/2026</b>",
@@ -297,8 +334,8 @@ describe("commands", () => {
         "Khác: 350.000đ (+250%)",
       ].join("\n"),
     );
-    expect(aiCalls.every((c) => c.system.includes("phân loại"))).toBe(true); // /summary never asks for commentary
-    expect(await send("/summary 13")).toContain("Cách dùng");
+    expect(aiCalls.every((c) => c.system.includes("phân loại"))).toBe(true); // /groupsummary never asks for commentary
+    expect(await send("/groupsummary 13")).toContain("Cách dùng: /groupsummary");
   });
 
   it("/daily toggles and reports state", async () => {
@@ -310,7 +347,7 @@ describe("commands", () => {
 
   it("/help lists the commands", async () => {
     const reply = await send("/help");
-    for (const cmd of ["/add", "/check", "/budget", "/summary", "/undo", "/daily"]) expect(reply).toContain(cmd);
+    for (const cmd of ["/add", "/check", "/groupcheck", "/budget", "/summary", "/groupsummary", "/undo", "/daily"]) expect(reply).toContain(cmd);
     expect(reply).not.toContain(String.fromCharCode(0x2014));
   });
 
@@ -613,21 +650,21 @@ describe("budget", () => {
     expect(await budgetCount()).toBe(0);
   });
 
-  it("/check is unchanged without a budget and adds the remaining line with one", async () => {
+  it("/groupcheck is unchanged without a budget and adds the remaining line with one", async () => {
     await send("/add 2tr a");
     await send("/add 300k b 05/09");
-    const before = await send("/check");
+    const before = await send("/groupcheck");
     await send("/budget 5tr");
-    expect(await send("/check")).toBe(`${before}\nNgân sách còn lại: 3.000.000đ`);
+    expect(await send("/groupcheck")).toBe(`${before}\nNgân sách còn lại: 3.000.000đ`);
     await send("/budget 1tr");
-    expect(await send("/check")).toMatch(/\nVượt ngân sách: 1\.000\.000đ$/);
+    expect(await send("/groupcheck")).toMatch(/\nVượt ngân sách: 1\.000\.000đ$/);
     await send("/budget off");
-    expect(await send("/check")).toBe(before);
+    expect(await send("/groupcheck")).toBe(before);
   });
 
-  it("/check with a budget and no expenses", async () => {
+  it("/groupcheck with a budget and no expenses", async () => {
     await send("/budget 5tr");
-    expect(await send("/check")).toBe(
+    expect(await send("/groupcheck")).toBe(
       "Chi tiêu tháng 10 (đến 08/10)\nChưa có khoản chi nào.\nNgân sách còn lại: 5.000.000đ",
     );
   });

@@ -184,16 +184,45 @@ export async function memberTotals(db: D1Database, chatId: number, from: string,
   return results;
 }
 
-/** Per-category totals for a date range, highest first. `category` is null for uncategorised expenses. */
-export async function categoryTotals(db: D1Database, chatId: number, from: string, to: string): Promise<CategoryTotal[]> {
+/** One user's total, count and largest expense for a date range (all 0 when none). */
+export async function userStats(
+  db: D1Database,
+  chatId: number,
+  userId: number,
+  from: string,
+  to: string,
+): Promise<{ total: number; count: number; max_amount: number }> {
+  const row = await db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count, COALESCE(MAX(amount), 0) AS max_amount
+       FROM expenses
+       WHERE chat_id = ? AND user_id = ? AND spent_on BETWEEN ? AND ? AND deleted_at IS NULL`,
+    )
+    .bind(chatId, userId, from, to)
+    .first<{ total: number; count: number; max_amount: number }>();
+  return row ?? { total: 0, count: 0, max_amount: 0 };
+}
+
+/**
+ * Per-category totals for a date range, highest first. `category` is null for uncategorised expenses.
+ * With `userId`, only that user's expenses count.
+ */
+export async function categoryTotals(
+  db: D1Database,
+  chatId: number,
+  from: string,
+  to: string,
+  userId?: number,
+): Promise<CategoryTotal[]> {
+  const userFilter = userId === undefined ? "" : " AND user_id = ?";
   const { results } = await db
     .prepare(
       `SELECT category, SUM(amount) AS total FROM expenses
-       WHERE chat_id = ? AND spent_on BETWEEN ? AND ? AND deleted_at IS NULL
+       WHERE chat_id = ? AND spent_on BETWEEN ? AND ? AND deleted_at IS NULL${userFilter}
        GROUP BY category
        ORDER BY total DESC, category`,
     )
-    .bind(chatId, from, to)
+    .bind(chatId, from, to, ...(userId === undefined ? [] : [userId]))
     .all<CategoryTotal>();
   return results;
 }
